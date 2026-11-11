@@ -120,3 +120,7 @@ npm test
 ```bash
 npm run e2e
 ```
+
+## Лицензия
+
+Код — под [лицензией MIT](LICENSE). У данных, карт и звуков свои условия, они перечислены в [README.md](README.md#data-and-credits).

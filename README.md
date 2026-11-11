@@ -102,4 +102,4 @@ GitHub Pages: `.github/workflows/pages.yml` builds the site with `PAGES_BASE=/re
 - **Planets:** places from JPL Horizons (DE441), masses from JPL's astrodynamic parameters (DE440), radii and scale heights from the NASA planetary fact sheets, rotation from the IAU WGCCRE 2015 report (Archinal et al. 2018), Saturn's rings from the NSSDC rings fact sheet. **Exoplanets:** NASA Exoplanet Archive.
 - **Sounds:** short cuts from recordings on [Freesound](https://freesound.org) under CC0 — loganzsound, cambrianman, Jofae, Foxfire-, JoontheFloof.
 
-No licence has been chosen for the code yet; the data above keep their own.
+The code is under the [MIT licence](LICENSE); the data, maps and sounds above keep their own terms.
