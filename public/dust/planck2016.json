@@ -1,0 +1,7 @@
+{
+ "about": "Dust structure finer than a 0.5\u00b0 cell, from the Planck GNILC dust optical depth at 353 GHz, 5\u2032 (Planck Collaboration Int. XLVIII 2016, A&A 596, A109; ESA/Planck), COM_CompMap_Dust-GNILC-Model-Opacity_2048_R2.01.fits: log10 of a factor on the dust of the 3D grid that averages to 1 over each of its cells; weaker where Planck sees mostly dust beyond the grid, 1 inside the LMC, SMC and M31. Built by scripts/build-dust-map.py --fine.",
+ "longitudes": 4320,
+ "latitudes": 2160,
+ "logMin": -0.5,
+ "logMax": 0.49609375
+}

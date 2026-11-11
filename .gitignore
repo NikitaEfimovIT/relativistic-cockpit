@@ -1,0 +1,18 @@
+# dependencies and builds
+node_modules/
+dist/
+.vite/
+# test and coverage output
+coverage/
+test-results/
+playwright-report/
+# Blender: renders are rebuilt by blender/cockpit.py; reference pictures are not ours to publish; backups
+blender/renders/
+blender/reference/
+*.blend1
+__pycache__/
+.ruff_cache/
+# local tools and the system
+.claude/
+.DS_Store
+*.log

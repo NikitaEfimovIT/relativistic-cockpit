@@ -1,0 +1,10 @@
+{
+ "about": "A_V per kpc from the 3D dust map of Edenhofer et al. 2024, A&A 685, A82 (CC BY 4.0), Zenodo 10.5281/zenodo.10658339, posterior mean; A_V = 2.8 E(ZGR23) as the authors convert. Built by scripts/build-dust-map.py.",
+ "longitudes": 720,
+ "latitudes": 360,
+ "shells": 48,
+ "innerPc": 68.619,
+ "outerPc": 1248.1,
+ "logMin": -3.0,
+ "logMax": 3.5
+}
