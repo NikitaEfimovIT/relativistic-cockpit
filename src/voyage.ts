@@ -1,6 +1,9 @@
 import * as THREE from 'three'
 import { EXOPLANETS } from './exoplanets'
 import type { Vec3 } from './galaxy'
+import { DISK_INNER, HOLES, schwarzschildRadius, wreckRadius, type Hole } from './blackHoles'
+import { diskTemperature, flatDiskLight } from './disk'
+import { LENS_REACH } from './lens'
 import { BODIES, STARS, equatorialToGalactic, type Body } from './nearbyStars'
 import { C, G0, LY, apparentDirection, lutXYZ, type Ship } from './physics'
 import { EARTH, EARTH_RADIUS_M, LAUNCH_JD, MOON, PLANETS, earthPosition, lambertPhase, sunFromEarth, type Globe } from './solarSystem'
@@ -67,6 +70,36 @@ export const galacticToShipMatrix = (attitude: Quat, target: THREE.Matrix3 = new
 export const targetDirection = (course: Course, ship: Ship): Vec3 =>
   apparentDirection(galacticToShip(course.attitude, normalise(sub(TARGETS[course.target].position, shipPosition(course, ship.x)))), ship.phi)
 
+/** The nearest black hole within its lens's reach: its Schwarzschild radius, how far, and which way, all in metres. */
+export interface HoleNear {
+  readonly hole: Hole
+  readonly rs: number // m
+  readonly r: number // m from its centre
+  readonly direction: Vec3 // unit, galactic axes, from the ship to the hole
+}
+
+const HOLE_PLACES = HOLES.map((hole) => ({ hole, position: hole.position, rs: schwarzschildRadius(hole.mass) }))
+
+export function holeNear(position: Vec3): HoleNear | null {
+  return HOLE_PLACES.reduce<HoleNear | null>((nearest, { hole, position: at, rs }) => {
+    const offset = sub(at, position)
+    const r = length(offset) * LY
+    const isNearer = r / rs < LENS_REACH && (!nearest || r / rs < nearest.r / nearest.rs)
+    return isNearer ? { hole, rs, r, direction: normalise(offset) } : nearest
+  }, null)
+}
+
+/** The hole whose wreck radius the ship's path from `from` to `to` crosses, ly; a frame at 0.999999 c spans 0.02 AU. */
+export function fallsIntoHole(from: Vec3, to: Vec3): Hole | null {
+  const path = sub(to, from)
+  const span = dot(path, path)
+  const crossed = HOLE_PLACES.find(({ hole, position }) => {
+    const along = span > 0 ? Math.min(1, Math.max(0, dot(sub(position, from), path) / span)) : 0
+    return length(sub(position, [from[0] + path[0] * along, from[1] + path[1] * along, from[2] + path[2] * along])) * LY < wreckRadius(hole.mass)
+  })
+  return crossed?.hole ?? null
+}
+
 /** Unit vector from the ship to the centre of the Galaxy, in the ship's axes. */
 export const directionToCentre = (course: Course, x: number): Vec3 =>
   galacticToShip(course.attitude, normalise(sub(BODIES[BODIES.length - 1].position, shipPosition(course, x))))
@@ -79,7 +112,18 @@ export interface Place {
   readonly position: Vec3 // ly from the Sun, galactic axes
   readonly standoff: number // ly
   readonly arrival: number // ly
+  readonly lead: number // real s: how early the brake call comes where the clock can slow no further
 }
+
+// The brake call comes early by what the pilot needs to act on it: to hear it and decide, then to pull the lever from
+// full thrust to full braking. Choices, not measurements: a second and a half to answer a tone the pilot is waiting for,
+// and two seconds for the lever, about what holding ↓ takes to step it through its forty notches.
+export const REACTION_S = 1.5
+export const LEVER_S = 2
+export const BRAKE_LEAD_S = REACTION_S + LEVER_S
+/** By a black hole twice that: there braking late is not a flyby but the end. Choice. */
+const HOLE_LEAD_S = 2 * BRAKE_LEAD_S
+const HOLE_BODIES = new Set(HOLES.map((hole) => hole.body))
 
 const LAUNCH_DISTANCE_M = 2.5e7 // from the Earth's centre, so that it spans 29°
 /** Nearer a globe than as many of its radii as the ship starts from the Earth it never stops: there it spans 29.5°. */
@@ -98,10 +142,11 @@ const HILL_STANDOFFS = 9
 const ARRIVAL_STANDOFFS = 20
 const GLOBE_ARRIVAL_STANDOFFS = 5
 
-const starPlace = ({ name, position, standoff }: Body): Place => ({ name, position, standoff, arrival: ARRIVAL_STANDOFFS * standoff })
+const starPlace = ({ name, position, standoff }: Body): Place =>
+  ({ name, position, standoff, arrival: ARRIVAL_STANDOFFS * standoff, lead: HOLE_BODIES.has(name) ? HOLE_LEAD_S : BRAKE_LEAD_S })
 const globePlace = (globe: Globe): Place => {
   const standoff = Math.max(globe.hill / HILL_STANDOFFS, GLOBE_STANDOFF_RADII * globe.radiusM) / LY
-  return { name: globe.name, position: globe.position, standoff, arrival: GLOBE_ARRIVAL_STANDOFFS * standoff }
+  return { name: globe.name, position: globe.position, standoff, arrival: GLOBE_ARRIVAL_STANDOFFS * standoff, lead: BRAKE_LEAD_S }
 }
 
 /** The Sun's planets outwards from it, the Moon after the Earth. */
@@ -198,6 +243,23 @@ export const eclipsed = (stars: readonly Source[], globes: readonly Source[]): S
   stars.map((star) => (globes.some((globe) => (globe.radius ?? 0) > Math.acos(Math.min(1, dot(star.direction, globe.direction))))
     ? { ...star, illuminance: 0 }
     : star))
+
+/**
+ * The disk of the hole near by as it lights the ship: the flat disk's light summed patch by patch (disk.ts), without the
+ * lens or the gas's Doppler (ponytail: for the meter and the cabin's light; the picture has both). Null away from one.
+ */
+export function diskSource(course: Course, ship: Ship): Source | null {
+  const position = shipPosition(course, ship.x)
+  const near = holeNear(position)
+  const disk = near?.hole.disk
+  if (!near || !disk) return null
+  const at = scale(sub(position, near.hole.position), LY / near.rs)
+  const light = flatDiskLight(at, disk.axis, DISK_INNER, disk.outer, (r) => diskTemperature(disk.t4, r))
+  const n = galacticToShip(course.attitude, light.direction)
+  // its size for the meter is what glows, a thin band edge on: the eye fixed on it adapts to it, as to a planet
+  const radius = Math.acos(Math.max(-1, 1 - light.solidAngle / (2 * Math.PI)))
+  return { direction: apparentDirection(n, ship.phi), illuminance: light.illuminance, temperature: light.temperature, radius }
+}
 
 /**
  * The Sun and the stars of the table as the crew sees them. A point source keeps W, so T′ = D·T, and its solid angle
@@ -299,22 +361,22 @@ export interface Navigation {
 
 const BRAKE_SOON = 0.8
 
-// The brake call comes early by what the pilot needs to act on it: to hear it and decide, then to pull the lever from
-// full thrust to full braking. Choices, not measurements: a second and a half to answer a tone the pilot is waiting for,
-// and two seconds for the lever, about what holding ↓ takes to step it through its forty notches.
-export const REACTION_S = 1.5
-export const LEVER_S = 2
-export const BRAKE_LEAD_S = REACTION_S + LEVER_S
-
 /**
- * m before the brake point where the call sounds BRAKE_LEAD_S real seconds ahead of it, with the clock at its limit:
- * that brings the brake point closer by a factor e every 1/EFOLD_RATE seconds down to the arrival radius, then covers
- * that radius in 1/EFOLD_RATE seconds more (clockLimit). A slower clock only gives the pilot more time. Answered at
- * once, the call stops the ship short by this much, within the arrival radius.
+ * m before the brake point where the call sounds the target's lead in real seconds ahead of it, with the clock at its
+ * limit (clockLimit). That brings the brake point closer by a factor e every 1/EFOLD_RATE seconds, down to whichever is
+ * further: the arrival radius, or where the clock is down to the pilot's own and the point comes at its full pace V =
+ * c·sinh φ·(1 + a/g), a up to g. The last stretch from there takes 1/EFOLD_RATE seconds either way. A slower clock only
+ * gives the pilot more time. Answered at once, the call stops the ship short by this much: within the arrival radius
+ * by a star or a planet; by a small target at speed further short, and the next, slower leg comes closer.
  */
-export function brakeCallDistance(course: Course): number {
-  const efolds = EFOLD_RATE * BRAKE_LEAD_S
-  return arrivalRadius(course) * (efolds <= 1 ? efolds : Math.exp(efolds - 1))
+export function brakeCallDistance(course: Course, phi: number = 0): number {
+  const { lead } = TARGETS[course.target]
+  const pace = 2 * C * Math.sinh(phi)
+  const precision = arrivalRadius(course)
+  const efolds = EFOLD_RATE * lead
+  return efolds <= 1
+    ? lead * Math.max(pace, EFOLD_RATE * precision)
+    : Math.max(precision, pace / EFOLD_RATE) * Math.exp(efolds - 1)
 }
 
 /** m from the ship to one of TARGETS, straight. */
@@ -333,7 +395,7 @@ export function navigate(course: Course, ship: Ship): Navigation {
       return toGo < 0 ? 'behind' : 'ready'
     }
     if (toGo < 0) return 'passed'
-    if (braking + brakeCallDistance(course) >= toGo) return 'brake'
+    if (braking + brakeCallDistance(course, ship.phi) >= toGo) return 'brake'
     return braking >= BRAKE_SOON * toGo ? 'brakeSoon' : 'cruise'
   })()
   return { name: TARGETS[course.target].name, distance, toGo, braking, cue }

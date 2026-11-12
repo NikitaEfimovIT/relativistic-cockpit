@@ -13,6 +13,7 @@ import {
 } from './physics'
 import { STAR_BOX_LY, generateStars, withoutNakedEyeStars } from './stars'
 import { galacticToShipMatrix, type Quat } from './voyage'
+import { LENS_GLSL, createLens } from './lensShader'
 
 /** Display calibration: a star of this magnitude sits at the visibility threshold. */
 const LIMITING_MAGNITUDE = 7.6
@@ -163,6 +164,7 @@ const GALAXY_FRAGMENT = /* glsl */ `
 ${BLACKBODY_GLSL}
 ${ABERRATION_GLSL}
 ${LINE_GLSL}
+${LENS_GLSL}
 uniform samplerCube uCubeA, uCubeB;
 uniform float uMix, uIsEye;
 uniform mat3 uBasis;
@@ -174,6 +176,13 @@ void main() {
   float denom = oneMinusCos + uEps * (-d.z);                 // 1 - β cos θ′
   float D = 1. / (uGamma * denom);                           // Doppler factor, ship-frame form
   vec3 n = vec3(d.xy * D, (oneMinusCos - uEps) / denom) * uBasis; // same ray in the galaxy frame, galactic axes
+  // By a black hole: where that ray came from, blueshifted by the fall into the well; black in its shadow; or the hole's
+  // disk or its star, met first, a surface as hot as it looks to an eye at rest there (a blackbody stays one at T·g)
+  float seenT;
+  int seen = lensView(n, seenT);
+  if (seen == 1) { gl_FragColor = vec4(0., 0., 0., 1.); return; }
+  if (seen == 2) { gl_FragColor = vec4(limited(blackbody(seenT * D) * uExposure), 1.); return; }
+  D *= uBlue;
   vec4 sky = mix(textureCube(uCubeA, n), textureCube(uCubeB, n), uMix);
   float visual = max(sky.r, 1e-6) * 1e-3;
   // The light of many populations through dust is one diluted blackbody of the colour temperature of its B−V
@@ -198,6 +207,8 @@ void main() {
 const STAR_VERTEX = /* glsl */ `
 ${BLACKBODY_GLSL}
 ${GALAXY_GLSL}
+${LENS_GLSL}
+uniform float uImage; // 0: each star where it is, or its image on its own side of a hole; 1: its image beyond the hole
 attribute float aTemperature, aRadiusSquared, aRandom;
 uniform float uGamma, uEps, uExposure, uPeakPerLux, uSigmaPx, uBox, uThin, uDust;
 uniform vec3 uShip, uFrom;
@@ -221,7 +232,13 @@ void main() {
     if (aRandom > density) { drop(); return; }
     blends = max(1., density);                                 // denser than the catalog: unresolved neighbours
   }
-  vec3 r = uBasis * g;                                         // into the ship's axes
+  // By a black hole each star is drawn twice: where its rays come from on either side of the hole, as bright as the
+  // lens makes it. Without one only the first draw is kept.
+  float mu = 1.;
+  vec3 toStar = g / max(length(g), 1e-12);
+  if (uLensOn > .5) toStar = imageOf(toStar, uImage, sqrt(aRadiusSquared) / max(length(g), 1e-12), mu);
+  else if (uImage > .5) { drop(); return; }
+  vec3 r = uBasis * (toStar * length(g));                      // into the ship's axes
 
   float dist = max(length(r), 1e-12);
   vec3 n = r / dist;
@@ -240,11 +257,11 @@ void main() {
   float T = 1. / (1. / aTemperature + extinction / 3.1 * ${COLOUR_EXCESS_SLOPE.toExponential(4)});
 
   // Point source: T′ = D T and solid angle Ω′ = Ω/D². Together these reproduce L′λ = D⁵ Lλ.
-  float solidAngle = 3.14159265 * aRadiusSquared / (dist * dist) / (D * D);
+  float solidAngle = 3.14159265 * aRadiusSquared / (dist * dist) / (D * D) * mu;
   float fade = uBox > 0. ? 1. - smoothstep(0.85, 1., dist / (uBox * 0.5)) : 1.;
   // Off-axis pixels subtend a smaller solid angle, as cos³, so the same flux reads brighter there (Schneegans 2025).
   float cosAxis = max(-view.z, .05);
-  vec3 color = blackbody(T * D) * solidAngle * blends * uPeakPerLux / (cosAxis * cosAxis * cosAxis) * uExposure * fade;
+  vec3 color = blackbody(T * D * uBlue) * solidAngle * blends * uPeakPerLux / (cosAxis * cosAxis * cosAxis) * uExposure * fade;
   float peak = max(color.r, max(color.g, color.b));
   if (!(peak > THRESHOLD)) { drop(); return; }
   float falloff = log(peak / THRESHOLD);
@@ -337,6 +354,7 @@ export function createSky(): Sky {
   const lut = new THREE.DataTexture(BLACKBODY_LUT, LUT_SIZE, 1, THREE.RGBAFormat, THREE.FloatType)
   lut.needsUpdate = true
   const bake = createGalaxyBake(1, loadDustMap())
+  const lens = createLens()
 
   const shared = {
     uLut: { value: lut },
@@ -363,7 +381,7 @@ export function createSky(): Sky {
   }
 
   const basis = { value: new THREE.Matrix3() }
-  const galaxySphere = sphere(GALAXY_FRAGMENT, { ...bake.uniforms, uBasis: basis }, THREE.NoBlending)
+  const galaxySphere = sphere(GALAXY_FRAGMENT, { ...bake.uniforms, ...lens.uniforms, uBasis: basis }, THREE.NoBlending)
   const cmbSphere = sphere(CMB_FRAGMENT, {
     uVeilLux: { value: 0 },
     uEyeZoom: { value: 1 },
@@ -381,38 +399,45 @@ export function createSky(): Sky {
     uPeakPerLux: { value: 1 },
     uSigmaPx: { value: 1 },
   }
+  type Stars = THREE.Points<THREE.BufferGeometry, THREE.ShaderMaterial>
+  /** One set of stars, drawn twice: as they are (or their near images by a hole), and their images beyond a hole. */
   const makeStars = (
     positions: Float32Array, temperatures: Float32Array, radiiSquared: Float32Array, randoms: Float32Array, box: number,
-  ): THREE.Points<THREE.BufferGeometry, THREE.ShaderMaterial> => {
+  ): readonly [Stars, Stars] => {
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
     geometry.setAttribute('aTemperature', new THREE.BufferAttribute(temperatures, 1))
     geometry.setAttribute('aRadiusSquared', new THREE.BufferAttribute(radiiSquared, 1))
     geometry.setAttribute('aRandom', new THREE.BufferAttribute(randoms, 1))
-    const points = new THREE.Points(geometry, new THREE.ShaderMaterial({
-      uniforms: {
-        ...starUniforms, uBox: { value: box }, uThin: { value: box > 0 ? 1 : 0 }, uDust: { value: box > 0 ? 1 : 0 }, uShip: { value: new THREE.Vector3() },
-      },
-      vertexShader: STAR_VERTEX,
-      fragmentShader: STAR_FRAGMENT,
-      blending: THREE.AdditiveBlending,
-      transparent: true,
-      depthTest: false,
-      depthWrite: false,
-      toneMapped: false,
-    }))
-    points.frustumCulled = false
-    points.renderOrder = 1
-    return points
+    const uniforms = {
+      ...starUniforms, ...lens.uniforms,
+      uBox: { value: box }, uThin: { value: box > 0 ? 1 : 0 }, uDust: { value: box > 0 ? 1 : 0 }, uShip: { value: new THREE.Vector3() },
+    }
+    const drawn = (image: number): Stars => {
+      const points = new THREE.Points(geometry, new THREE.ShaderMaterial({
+        uniforms: { ...uniforms, uImage: { value: image } },
+        vertexShader: STAR_VERTEX,
+        fragmentShader: STAR_FRAGMENT,
+        blending: THREE.AdditiveBlending,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false,
+      }))
+      points.frustumCulled = false
+      points.renderOrder = 1
+      return points
+    }
+    return [drawn(0), drawn(1)]
   }
 
   // The synthetic sky leaves the naked-eye stars, as seen from the Sun, to the real catalogue
   const catalog = withoutNakedEyeStars(generateStars(), BRIGHT_LIMIT_V)
-  const stars = makeStars(catalog.positions, catalog.temperatures, catalog.radiiSquared, catalog.randoms, STAR_BOX_LY)
+  const [stars, starsBeyond] = makeStars(catalog.positions, catalog.temperatures, catalog.radiiSquared, catalog.randoms, STAR_BOX_LY)
   // The real stars, the targets and the naked-eye sky from Hipparcos, are placed relative to the ship on the CPU, in
   // double precision: in float32 a star 25 ly off would jump in steps of a tenth of an AU as the ship closes in on it.
   const realStars = [...STARS, ...BRIGHT_STARS]
-  const neighbours = makeStars(
+  const [neighbours, neighboursBeyond] = makeStars(
     new Float32Array(realStars.length * 3),
     Float32Array.from(realStars, (star) => star.temperature),
     Float32Array.from(realStars, (star) => star.radiusSquared),
@@ -424,7 +449,7 @@ export function createSky(): Sky {
   const globes = ALL_GLOBES.map((globe, i) => createGlobe(globe, blackbodyTint, globeGeometry, 2 + i, mapOf(globe)))
 
   const scene = new THREE.Scene()
-  scene.add(galaxySphere, stars, neighbours, ...globes.flatMap((globe) => (globe.rings ? [globe.mesh, globe.rings] : [globe.mesh])))
+  scene.add(galaxySphere, stars, starsBeyond, neighbours, neighboursBeyond, ...globes.flatMap((globe) => (globe.rings ? [globe.mesh, globe.rings] : [globe.mesh])))
   const cmbScene = new THREE.Scene()
   cmbScene.add(cmbSphere)
 
@@ -440,6 +465,15 @@ export function createSky(): Sky {
     const attribute = neighbours.geometry.getAttribute('position') as THREE.BufferAttribute
     realStars.forEach((star, i) => attribute.setXYZ(i, star.position[0] - position[0], star.position[1] - position[1], star.position[2] - position[2]))
     attribute.needsUpdate = true
+  }
+  // A hole's star is drawn as its disc while the hole's lens is on, and so not as a point too
+  const sizes = neighbours.geometry.getAttribute('aRadiusSquared') as THREE.BufferAttribute
+  let hiddenStar: string | null = null
+  const hideStar = (name: string | null): void => {
+    if (name === hiddenStar) return
+    STARS.forEach((star, i) => { if (star.name === hiddenStar || star.name === name) sizes.setX(i, star.name === name ? 0 : star.radiusSquared) })
+    sizes.needsUpdate = true
+    hiddenStar = name
   }
   const withoutAutoClear = (gl: THREE.WebGLRenderer, draw: () => void): void => {
     const autoClear = gl.autoClear
@@ -461,6 +495,10 @@ export function createSky(): Sky {
       starUniforms.uFrom.value.set(...galactocentric(position))
       stars.material.uniforms.uShip.value.set(wrap(position[0]), wrap(position[1]), wrap(position[2]))
       placeNeighbours(position)
+      lens.update(position)
+      hideStar(lens.hiddenStar())
+      starsBeyond.visible = lens.isOn()
+      neighboursBeyond.visible = lens.isOn()
       for (const globe of globes) globe.update(view, pixelAngle)
       // the farthest first, so that the nearer hides it: by Mars it is Mars in front, not the Earth
       const away = (i: number): number => Math.hypot(...ALL_GLOBES[i].position.map((c, k) => c - position[k]))
@@ -491,12 +529,11 @@ export function createSky(): Sky {
     dispose() {
       lut.dispose()
       bake.dispose()
+      lens.dispose()
       for (const globe of globes) globe.dispose()
       globeGeometry.dispose()
-      for (const node of [galaxySphere, cmbSphere, stars, neighbours]) {
-        node.geometry.dispose()
-        node.material.dispose()
-      }
+      for (const node of [galaxySphere, cmbSphere, stars, neighbours]) node.geometry.dispose() // the images beyond share it
+      for (const node of [galaxySphere, cmbSphere, stars, starsBeyond, neighbours, neighboursBeyond]) node.material.dispose()
     },
   }
 }

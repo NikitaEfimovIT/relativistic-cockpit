@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { AU_LY, BODIES, STARS, equatorialDirection, equatorialToGalactic, indexOfBody, luminosityOf, visualRadiusSquared } from './nearbyStars'
-import { illuminanceToMagnitude, lutXYZ } from './physics'
+import { LY, illuminanceToMagnitude, lutXYZ } from './physics'
+import { HOLES, schwarzschildRadius } from './blackHoles'
 
 const DEG = Math.PI / 180
 const body = (name: string) => BODIES[indexOfBody(name)]
@@ -40,7 +41,12 @@ describe('coordinates', () => {
     for (let i = 1; i < distances.length; i++) expect(distances[i]).toBeGreaterThanOrEqual(distances[i - 1] - 1e-9)
     expect(BODIES[0].name).toBe('Солнце')
     expect(distances[distances.length - 1]).toBeGreaterThan(26_000)
-    expect(STARS).toHaveLength(BODIES.length - 1)
+    expect(STARS).toHaveLength(BODIES.length - HOLES.length) // a black hole is a place, not a star
+  })
+
+  test('at the centre of the Galaxy the ship stops by Sgr A*, 10 Schwarzschild radii out', () => {
+    const sgrA = HOLES.find((hole) => hole.body === 'Центр Галактики')
+    expect(sgrA && body('Центр Галактики').standoff * LY).toBeCloseTo(10 * schwarzschildRadius(4.297e6), -3)
   })
 })
 

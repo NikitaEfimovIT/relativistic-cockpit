@@ -11,9 +11,11 @@ import {
 import { CO2_LIMIT, CO2_OFF_NOMINAL } from './lifeSupport'
 import { PROPELLANT, deltaV } from './chemical'
 import { legendIn, useLang } from './labels'
-import { closestApproach, orbitOf, type Local } from './flight'
+import { closestApproach, localPosition, orbitOf, type Local } from './flight'
+import { clockRate } from './blackHoles'
+import { shadowAngle } from './lens'
 import { clockHold, clockSetting, currentWarp, eventTimer, faceCo2, properAcceleration, sim, type Breaker, type SimState } from './sim'
-import { TARGETS, distanceTo, isAtRest, navigate } from './voyage'
+import { TARGETS, distanceTo, holeNear, isAtRest, navigate } from './voyage'
 
 export const FONT = '"SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace'
 export const PIXELS_PER_METRE = 1500
@@ -141,6 +143,23 @@ export function Screen({ width, height, paint, hasBezel = true, delay = 0, isFed
   )
 }
 
+const DEG = Math.PI / 180
+/** r in Schwarzschild radii: a tenth near the hole, whole ones further out. */
+const holeDistanceText = (x: number): string => `${x < 100 ? x.toFixed(1) : Math.round(x)} r_s`
+
+/** Nothing pulls the ship: by a black hole, how far it is, how slow the ship's clock runs, and how wide the shadow. */
+function driftRows(local: Local): ReadonlyArray<{ readonly label: string; readonly value: string }> {
+  const near = holeNear(localPosition(local))
+  if (!near) return [{ label: 'ТЕЛО', value: 'НЕТ ПРИТЯЖЕНИЯ' }]
+  const x = near.r / near.rs
+  return [
+    { label: 'ДЫРА', value: near.hole.name },
+    { label: 'РАССТОЯНИЕ', value: holeDistanceText(x) },
+    { label: 'ЧАСЫ БОРТА', value: `×${clockRate(near.rs, near.r).toFixed(3)}` },
+    { label: 'ТЕНЬ', value: `${((2 * shadowAngle(x)) / DEG).toFixed(x < 1000 ? 1 : 3)}°` },
+  ]
+}
+
 /** By a body the screen shows the orbit: where the ship is on it, the propellant left, and how near the target it comes. */
 function paintOrbit(ctx: CanvasRenderingContext2D, width: number, height: number, s: SimState, local: Local): void {
   const orbit = orbitOf(local)
@@ -150,9 +169,7 @@ function paintOrbit(ctx: CanvasRenderingContext2D, width: number, height: number
   const fuel = `${Math.round((100 * p.propellant) / PROPELLANT)} % · ${Math.round(deltaV(p))} м/с`
   const near = { label: 'СБЛИЖЕНИЕ', value: `${distanceText(approach.distance)} ЧЕРЕЗ ${durationText(approach.time)}` }
   if (!orbit) {
-    paintRows(ctx, width, height, `ДРЕЙФ → ${legend(target.name)}`, [
-      { label: 'ТЕЛО', value: 'НЕТ ПРИТЯЖЕНИЯ' }, { label: 'ТОПЛИВО', value: fuel }, near,
-    ], AMBER)
+    paintRows(ctx, width, height, `ДРЕЙФ → ${legend(target.name)}`, [...driftRows(local), { label: 'ТОПЛИВО', value: fuel }, near], AMBER)
     return
   }
   const { globe, elements } = orbit

@@ -758,7 +758,7 @@ const LOOK_AT_MAIL = { dx: -220, dy: 0 } // the mail is on the left-hand screen
 const SECOND_LETTER = { x: 317, y: 362 } // the second letter of the inbox, newest first
 const LOOK_AT_SYSTEMS = { dx: 440, dy: 0 } // from the mail across to the right-hand screen
 const MANUAL_TAB = { x: 707, y: 294 } // «Руководство», the third of the tabs in its bar
-const POWER_SECTION = { x: 498, y: 416 } // «Питание», the seventh line of the manual's contents, ten lines close up
+const POWER_SECTION = { x: 498, y: 406 } // «Питание», the seventh line of the manual's contents, eleven lines close up
 
 test('at the desk the engineer picks a star on the map for the cockpit target screen, and opens a letter', async ({ page }) => {
   const errors = await open(page)

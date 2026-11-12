@@ -8,9 +8,10 @@ import { INITIAL_HABITAT, busLoadW, crewCondition, heatersRunning, isVenting, st
 import { CO2_SCRUBBED, UNTENDED_AIR_WARP, co2AtFace, stepCo2 } from './lifeSupport'
 import { C, G0, HULL_BETA, LETHAL_DOSE, YEAR, advanceShip, betaOf, doseRate, rest, type Ship } from './physics'
 import {
-  LAUNCH_TARGET, TARGETS, arrivalRadius, clockLimit, distanceTo, forwardOf, launchCourse, navigate, rotated, setCourse, shipPosition, stepTurn,
-  turnAngle, type Course,
+  LAUNCH_TARGET, TARGETS, arrivalRadius, clockLimit, distanceTo, fallsIntoHole, forwardOf, holeNear, launchCourse, navigate, rotated, setCourse,
+  shipPosition, stepTurn, turnAngle, type Course,
 } from './voyage'
+import { clockRate, tidalRadius } from './blackHoles'
 
 const DEG = Math.PI / 180
 const scaled = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k]
@@ -398,8 +399,9 @@ function move(s: SimState, acceleration: number, dTau: number): Motion {
   const { ship, course, local, propulsion, track } = s
   if (local && acceleration <= 0) {
     const step = stepLocal(local, propulsion, course.attitude, dTau, isChemBurning(s))
+    const near = holeNear(localPosition(step.local))
     return {
-      ship: { ...ship, tau: ship.tau + dTau, t: ship.t + dTau },
+      ship: { ...ship, tau: ship.tau + dTau, t: ship.t + dTau / (near ? clockRate(near.rs, near.r) : 1) },
       course: { ...course, origin: localPosition(step.local), startX: ship.x },
       local: step.local, propulsion: step.propulsion, wrecked: step.isWrecked, track,
     }
@@ -430,7 +432,9 @@ export function stepSim(s: SimState, dtReal: number): SimState {
   const warp = Math.min(clockCeiling({ ...s, spool, ...steered }).warp, s.warp * Math.exp(dtReal / WARP_RISE_TIME))
   const untilFault = Math.max(0, s.nextFaultAt - s.ship.tau)
   const dTau = Math.min(dtReal * warp, untilFault) // a fault ends the frame where it strikes: the clock drops from there
-  const motion = move({ ...s, course: steered.course, propulsion: stepPressure(steered.propulsion, dTau) }, acceleration, dTau)
+  const moved = move({ ...s, course: steered.course, propulsion: stepPressure(steered.propulsion, dTau) }, acceleration, dTau)
+  const fallen = fallsIntoHole(shipPosition(s.course, s.ship.x), shipPosition(moved.course, moved.ship.x))
+  const motion = { ...moved, wrecked: moved.wrecked || fallen !== null }
   const { ship, course } = motion
   const burnStartedAt = isChemBurning({ ...s, ...motion }) ? (s.burnStartedAt ?? s.ship.tau) : null
   const dose = s.dose + (isShielded(s) ? 0 : doseRate(ship.phi) * dTau) // ponytail: ideal shield, no leakage model
@@ -470,11 +474,14 @@ const CREW_LOG: Readonly<Record<CrewCondition, readonly [string, LogLevel]>> = {
   переохлаждение: ['Экипаж: переохлаждение', 'warning'], погиб: ['Экипаж погиб', 'warning'],
 }
 const capital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
-/** The log's line for a wreck: the air or the ground of the body that pulled the ship. */
+/** The log's line for a wreck: the air or the ground of the body that pulled the ship, or the hole it came too near. */
 const wreckText = (s: SimState): string => {
   const globe = s.local?.centre != null ? ALL_GLOBES[s.local.centre] : null
-  if (!globe) return 'Корабль разрушен'
-  return `Корабль разрушен: ${globe.ceiling > 0 ? 'вход в атмосферу' : 'удар о поверхность'}, ${globe.name}`
+  if (globe) return `Корабль разрушен: ${globe.ceiling > 0 ? 'вход в атмосферу' : 'удар о поверхность'}, ${globe.name}`
+  const near = holeNear(shipPosition(s.course, s.ship.x))
+  if (!near) return 'Корабль разрушен'
+  const cause = tidalRadius(near.hole.mass) > 1.5 * near.rs ? 'приливные силы' : 'падение в чёрную дыру'
+  return `Корабль разрушен: ${cause}, ${near.hole.name}`
 }
 
 /**

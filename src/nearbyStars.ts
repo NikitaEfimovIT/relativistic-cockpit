@@ -1,4 +1,6 @@
-import { KPC_LY, R_SUN, SUN, type Vec3 } from './galaxy'
+import { HOLES, parkingRadius, type Companion, type Hole } from './blackHoles'
+import { equatorialDirection, equatorialToGalactic } from './coords'
+import type { Vec3 } from './galaxy'
 import { LY, lutXYZ, magnitudeToIlluminance } from './physics'
 
 // The real stars a flight can be aimed at: the neighbours, some bright stars further out, and Betelgeuse. Positions,
@@ -6,21 +8,7 @@ import { LY, lutXYZ, magnitudeToIlluminance } from './physics'
 // 1999 for α Cen). Temperatures are the mean of the SIMBAD measurements published since 2000, row by row, to 10 K.
 // Proper motions are left out: in a few decades they move nothing.
 
-/** ICRS to galactic rotation; rows are the galactic axes (Hipparcos catalogue, ESA 1997, vol. 1, §1.5.3). */
-const ICRS_TO_GALACTIC: readonly Vec3[] = [
-  [-0.0548755604, -0.873437090, -0.4838350155],
-  [0.4941094279, -0.4448296300, 0.7469822445],
-  [-0.8676661490, -0.1980763734, 0.4559837762],
-]
-
-const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-const DEG = Math.PI / 180
-
-export const equatorialToGalactic = (v: Vec3): Vec3 => [dot(ICRS_TO_GALACTIC[0], v), dot(ICRS_TO_GALACTIC[1], v), dot(ICRS_TO_GALACTIC[2], v)]
-
-/** Unit vector towards right ascension and declination, both in degrees, in equatorial axes. */
-export const equatorialDirection = (ra: number, dec: number): Vec3 =>
-  [Math.cos(dec * DEG) * Math.cos(ra * DEG), Math.cos(dec * DEG) * Math.sin(ra * DEG), Math.sin(dec * DEG)]
+export { equatorialDirection, equatorialToGalactic } from './coords'
 
 export const LY_PER_PC = 3.261563777
 export const AU_LY = 1.495978707e11 / LY
@@ -89,17 +77,31 @@ const fromCatalog = ({ name, ra, dec, parallax, v, temperature }: CatalogStar): 
 
 const SUN_BODY: Body = { name: 'Солнце', position: [0, 0, 0], temperature: T_SUN, radiusSquared: SOLAR_RADIUS_LY ** 2, standoff: AU_LY }
 
-/** Sgr A*: nothing to draw, the bulge in the bake is what shows there. Stop well outside the central cluster. */
-const GALACTIC_CENTRE: Body = {
-  name: 'Центр Галактики',
-  position: [-SUN[0] * KPC_LY, -SUN[1] * KPC_LY, -SUN[2] * KPC_LY],
-  temperature: 0,
-  radiusSquared: 0,
-  standoff: 0.01 * R_SUN * KPC_LY,
+/** A black hole: no star to draw, only its shadow, its disk and the sky it bends (lens.ts). */
+const holeBody = (hole: Hole): Body =>
+  ({ name: hole.body, position: hole.position, temperature: 0, radiusSquared: 0, standoff: parkingRadius(hole) / LY })
+
+/**
+ * A hole's star as a catalogue star: as bright as its V from the Earth, its dust in it. At its true size it would show
+ * unreddened, V 5.6 for 8.9, a naked-eye star in Cygnus that is not there; by the hole its true disc is drawn (lens.ts).
+ */
+const companionBody = ({ name, position, temperature, v }: Companion): Body => {
+  const radiusSquared = visualRadiusSquared(v, temperature, Math.hypot(...position))
+  const standoff = Math.max(MIN_STANDOFF_AU, Math.sqrt(luminosityOf(radiusSquared, temperature))) * AU_LY
+  return { name, position, temperature, radiusSquared, standoff }
 }
 
-/** Every place a course can be set for: the Sun first, the stars by distance, the centre of the Galaxy last. */
-export const BODIES: readonly Body[] = [SUN_BODY, ...CATALOG.map(fromCatalog), GALACTIC_CENTRE]
+const distance = (body: Body): number => Math.hypot(...body.position)
+
+/** Every place a course can be set for: the Sun first, the stars and black holes by distance; the centre of the Galaxy is the last. */
+export const BODIES: readonly Body[] = [
+  SUN_BODY,
+  ...[
+    ...CATALOG.map(fromCatalog),
+    ...HOLES.map(holeBody),
+    ...HOLES.flatMap((hole) => (hole.companion ? [companionBody(hole.companion)] : [])),
+  ].sort((a, b) => distance(a) - distance(b)),
+]
 
 /** The ones drawn as stars. */
 export const STARS: readonly Body[] = BODIES.filter((body) => body.temperature > 0)

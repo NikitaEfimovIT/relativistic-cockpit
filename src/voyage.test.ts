@@ -8,7 +8,7 @@ import { orbitOf } from './flight'
 import { EARTH_RADIUS_M, GLOBES, LAUNCH_JD, earthPosition, sunFromEarth } from './solarSystem'
 import {
   LAUNCH_TARGET, TARGETS, arrivalRadius, brakeCallDistance, brakingDistance, directionToCentre, eclipsed, distanceToGo, earthSource, forwardOf, galacticToShip, indexOfTarget,
-  launchCourse, BRAKE_LEAD_S, LEVER_S, REACTION_S, clockLimit, navigate, setCourse, shipPosition, starSources, stepTurn, targetDirection,
+  launchCourse, BRAKE_LEAD_S, LEVER_S, REACTION_S, clockLimit, holeNear, navigate, setCourse, shipPosition, starSources, stepTurn, targetDirection,
 } from './voyage'
 
 type Vec3 = readonly [number, number, number]
@@ -321,6 +321,66 @@ describe('a whole flight, following the hints', () => {
     const nav = navigate(end.course, end.ship)
     expect(nav.cue).toBe('arrived')
     expect(-nav.toGo).toBeLessThan(surfaceAhead)
+  })
+})
+
+describe('by a black hole', () => {
+  const sgrA = indexOfTarget('Центр Галактики')
+  /** Near top speed for Sgr A* under full thrust, `ahead` arrival radii short of the brake point. */
+  const inbound = (ahead: number, phi = 7): SimState => {
+    const course = launchCourse(sgrA)
+    const s = { ...setThrottle(toggleEngine(readyForStart(atFastestClock(initialSim(phi, 0)))), 1), spool: 1, course }
+    return { ...s, ship: { ...s.ship, x: distanceToGo(course, 0) - brakingDistance(phi) - ahead * arrivalRadius(course) } }
+  }
+  /** Real seconds from the start until the call, and until the brake point, for a pilot who does not brake. */
+  const callAndPoint = (start: SimState): { readonly call: number; readonly point: number } => {
+    let s = start
+    let call = Infinity
+    for (let t = 0; t < 300; t += FRAME) {
+      const nav = navigate(s.course, s.ship)
+      if (nav.cue === 'brake' && call === Infinity) call = t
+      if (nav.braking >= nav.toGo) return { call, point: t }
+      s = stepSim(s, FRAME)
+    }
+    throw new Error('never reached the brake point')
+  }
+  /** Full thrust until the call, `reaction` seconds to answer it, the lever pulled back, full braking to a stop. */
+  const flyIn = (start: SimState, reaction: number): SimState => {
+    let s = start
+    let called = -1
+    for (let seconds = 0; seconds < 900 && !s.wrecked; seconds += FRAME) {
+      const { cue } = navigate(s.course, s.ship)
+      if (cue === 'arrived') break
+      if (called < 0 && (cue === 'brake' || cue === 'passed')) called = seconds
+      const since = called < 0 ? -1 : seconds - called
+      s = setThrottle(s, since < reaction ? 1 : 1 - 2 * Math.min(1, (since - reaction) / LEVER_S))
+      s = stepSim(s, FRAME)
+    }
+    return s
+  }
+
+  test('the ship stops by Sgr A* 10 Schwarzschild radii out, and only nearby is the hole near', () => {
+    const parked = { ...rest(), x: distanceToGo(launchCourse(sgrA), 0) }
+    const near = holeNear(shipPosition(launchCourse(sgrA), parked.x))
+    expect(near?.hole.name).toBe('Sgr A*')
+    expect(near && near.r / near.rs).toBeCloseTo(10, 3)
+    expect(holeNear(shipPosition(launchCourse(), 0))).toBeNull()
+  })
+
+  test('where the clock can slow no further, the call still comes twice the reaction and the lever ahead: death waits past it', () => {
+    const { call, point } = callAndPoint(inbound(20))
+    expect(point - call).toBeGreaterThan(2 * BRAKE_LEAD_S - 0.3)
+  })
+
+  test('answered at once, the call stops the ship short of Sgr A*; answered late, the ship falls into it', () => {
+    const prompt = flyIn(inbound(20), REACTION_S)
+    expect(prompt.wrecked).toBe(false)
+    expect(navigate(prompt.course, prompt.ship).cue).toBe('arrived')
+    expect(navigate(prompt.course, prompt.ship).toGo).toBeGreaterThan(0)
+
+    const late = flyIn(inbound(20), REACTION_S + 2 * BRAKE_LEAD_S + 1)
+    expect(late.wrecked).toBe(true)
+    expect(late.log.map((entry) => entry.text)).toContain('Корабль разрушен: падение в чёрную дыру, Sgr A*')
   })
 })
 

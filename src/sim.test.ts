@@ -8,14 +8,15 @@ import {
   BURN_WARP, crewOf, cutOff, eventTimer, isChemBurning, setChemThrottle, nudgeChemThrottle, setStick, toggleChemEngine, toggleFeed, toggleManualAttitude,
   togglePressurisation,
 } from './sim'
-import { LOCAL_BETA, orbitOf } from './flight'
+import { LOCAL_BETA, localAt, localPosition, orbitOf } from './flight'
 import { turnAngle } from './voyage'
 import { activeFaults } from './failures'
 import { crewCondition } from './habitat'
 import { CO2_LIMIT, CO2_SCRUBBED, UNTENDED_AIR_WARP } from './lifeSupport'
-import { TARGETS, brakingDistance, distanceToGo, indexOfTarget, launchCourse, navigate } from './voyage'
+import { TARGETS, brakingDistance, distanceToGo, indexOfTarget, launchCourse, navigate, shipPosition } from './voyage'
 import { commLink, messagesDue } from './comms'
-import { rest } from './physics'
+import { LY, rest } from './physics'
+import { schwarzschildRadius } from './blackHoles'
 
 const run = (sim: SimState, seconds: number): SimState =>
   Array.from({ length: Math.round(seconds * 20) }).reduce<SimState>((s) => stepSim(s, 0.05), sim)
@@ -559,4 +560,28 @@ test('the chemical lever let go between its stops settles where it can stand', (
   expect(setChemThrottle(initialSim(), 0.75).propulsion.throttle).toBeCloseTo(0.6, 12)
   expect(setChemThrottle(initialSim(), 1.4).propulsion.throttle).toBe(1)
   expect(setChemThrottle(initialSim(), -0.3).propulsion.throttle).toBe(0)
+})
+
+describe('by a black hole', () => {
+  /** At rest `r` Schwarzschild radii short of Sgr A*, on the line from the Earth, the clock turned up. */
+  const parkedBySgrA = (r: number): SimState => {
+    const launch = launchCourse(indexOfTarget('Центр Галактики'))
+    const x = distanceToGo(launch, 0) + TARGETS[launch.target].standoff * LY - r * schwarzschildRadius(4.297e6)
+    const local = localAt(shipPosition(launch, x), [0, 0, 0])
+    const s = atFastestClock(initialSim())
+    return { ...s, ship: { ...rest(), x }, course: { ...launch, origin: localPosition(local), startX: x }, local }
+  }
+
+  test('parked 10 r_s from Sgr A*, the Galaxy’s clock runs 1/0.949 as fast again as the ship’s', () => {
+    const start = parkedBySgrA(10)
+    const end = run(start, 3)
+    expect((end.ship.t - start.ship.t) / (end.ship.tau - start.ship.tau)).toBeCloseTo(1 / Math.sqrt(0.9), 6)
+    expect(end.wrecked).toBe(false)
+  })
+
+  test('inside the photon sphere the ship is lost at once', () => {
+    const lost = stepSim(parkedBySgrA(1.4), 0.05)
+    expect(lost.wrecked).toBe(true)
+    expect(lost.log.map((entry) => entry.text)).toContain('Корабль разрушен: падение в чёрную дыру, Sgr A*')
+  })
 })

@@ -35,7 +35,8 @@ import { COCKPIT_DOOR_Z } from './cockpitLayout'
 import { INITIAL_DESK, desk, deskPointer, wheelDesk, type DeskUi } from './deskUi'
 import { BATTERY_WH, celsius, ppO2Kpa, pressureKpa } from './habitat'
 import { MAP_SCALES } from './galaxyMap'
-import { TARGETS, brakingDistance, eclipsed, globeSource, shipPosition, starSources, type Source } from './voyage'
+import { TARGETS, brakingDistance, diskSource, eclipsed, globeSource, holeNear, shipPosition, starSources, type Source } from './voyage'
+import { clockRate } from './blackHoles'
 
 const DEG = Math.PI / 180
 const REFERENCE_HALF_FOV = 35 * DEG
@@ -300,7 +301,8 @@ function Stage({ onZoom, onAim }: StageProps) {
     // left out so that the view does not drift), so while the tint is on its share simply stays away.
     const transmission = filterTransmission(s.filter)
     const globesOutside = ALL_GLOBES.map((globe) => globeSource(s.course, s.ship, globe))
-    const outside: readonly Source[] = [...eclipsed(starSources(s.course, s.ship), globesOutside), ...globesOutside]
+    const disk = diskSource(s.course, s.ship)
+    const outside: readonly Source[] = [...eclipsed(starSources(s.course, s.ship), globesOutside), ...globesOutside, ...(disk ? [disk] : [])]
     const offAxis = ({ direction: [x, y, z] }: Source): number => Math.acos(Math.max(-1, Math.min(1, x * look3.x + y * look3.y + z * look3.z)))
     const zoom = look.current.zoom
     const fromOutside = outside.reduce((sum, source) => sum + meteredSource(source.illuminance, offAxis(source), halfFov, source.radius, zoom), 0)
@@ -399,10 +401,13 @@ const percent = (part: number, whole: number): string => `${Math.round((100 * pa
 function flightText(s: SimState): string {
   const p = s.propulsion
   const orbit = s.local ? orbitOf(s.local) : null
+  const hole = holeNear(shipPosition(s.course, s.ship.x))
   const place = orbit
     ? `тело ${orbit.globe.name}, высота ${km(orbit.altitude)}, отн. тела ${Math.round(orbit.speed)} м/с, `
       + `апоцентр ${km(orbit.elements.apoapsis - orbit.globe.radiusM)}, перицентр ${km(orbit.elements.periapsis - orbit.globe.radiusM)}`
-    : 'тело нет'
+    : hole
+      ? `дыра ${hole.hole.name}, ${(hole.r / hole.rs).toFixed(1)} r_s, ход часов ${clockRate(hole.rs, hole.r).toFixed(3)}`
+      : 'тело нет'
   return [
     `режим ${s.local ? 'у тела' : 'световой'}`,
     place,

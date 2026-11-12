@@ -1,4 +1,5 @@
 import type { Vec3 } from './galaxy'
+import { LAUNCH_JD } from './coords'
 import { AU_LY, BODIES, equatorialToGalactic, type Body } from './nearbyStars'
 import { hillRadius } from './orbit'
 import { LY } from './physics'
@@ -15,8 +16,7 @@ const PRECESSION = 5028.796195 / 3600
 /** Obliquity of J2000, as in JPL's approximate positions of the planets. */
 const OBLIQUITY = 23.43928 * DEG
 
-/** 2027-05-01 0h UT. α Centauri, the first target, is then near opposition, so the Sun is behind the ship at launch. */
-export const LAUNCH_JD = 2_461_526.5
+export { LAUNCH_JD } from './coords'
 export const EARTH_RADIUS_M = 6.371e6
 /** Bond albedo of the Earth (Stephens et al. 2015, CERES). */
 export const EARTH_ALBEDO = 0.3

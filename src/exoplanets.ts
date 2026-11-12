@@ -1,5 +1,6 @@
 import type { Vec3 } from './galaxy'
-import { AU_LY, BODIES, equatorialToGalactic, indexOfBody } from './nearbyStars'
+import { skyFrame } from './coords'
+import { AU_LY, BODIES, indexOfBody } from './nearbyStars'
 import { hillRadius } from './orbit'
 import { EARTH_RADIUS_M, GLOBES, LAUNCH_JD, PLANETS, SUN_GM, type Globe } from './solarSystem'
 
@@ -57,21 +58,6 @@ const ASSUMED_INCLINATION = 60 // deg
 const ROCK_BELOW = 1.6 // R⊕
 const ICE_GIANT_BELOW = 6 // R⊕
 
-const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-const unit = (a: Vec3): Vec3 => {
-  const length = Math.sqrt(dot(a, a))
-  return [a[0] / length, a[1] / length, a[2] / length]
-}
-
-/** North, east and away from the Sun at a star's place, in galactic axes. */
-function skyFrame(position: Vec3): readonly [Vec3, Vec3, Vec3] {
-  const away = unit(position)
-  const pole = equatorialToGalactic([0, 0, 1])
-  const along = dot(pole, away)
-  const north = unit([pole[0] - along * away[0], pole[1] - along * away[1], pole[2] - along * away[2]])
-  const east: Vec3 = [north[1] * away[2] - north[2] * away[1], north[2] * away[0] - north[0] * away[2], north[0] * away[1] - north[1] * away[0]]
-  return [north, east, away]
-}
 
 const eccentricAnomaly = (mean: number, e: number): number => {
   let anomaly = mean + e * Math.sin(mean)
