@@ -53,7 +53,10 @@ float rayU(float eps, float phi) {
   float f = fract(col);
   float a = mix(texelFetch(uRays, p, 0).r, texelFetch(uRays, p + ivec2(1, 0), 0).r, f);
   float b = mix(texelFetch(uRays, p + ivec2(0, 1), 0).r, texelFetch(uRays, p + ivec2(1, 1), 0).r, f);
-  return mix(a, b, row - lower) / max(impact(eps), 1e-30);
+  float w = mix(a, b, row - lower);
+  // past the shadow the table holds what the hole adds to a straight line (lens.ts, straight)
+  if (eps >= uShadow) w += phi + eps < LENS_PI ? sin(phi + eps) : LENS_PI - phi - eps;
+  return w / max(impact(eps), 1e-30);
 }
 // Page & Thorne 1974, eq. 15n, at x = r/M (disk.ts)
 float thinDiskFlux(float x) {

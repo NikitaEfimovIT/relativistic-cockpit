@@ -85,4 +85,36 @@ describe('where along a ray it is, for the disk', () => {
     expect(rayRadius(rays, rays.shadow / 2, 3 * Math.PI - 0.01)).toBe(0)
     expect(rayRadius(rays, 2, 3 * Math.PI - 0.01)).toBe(Infinity)
   })
+
+  // Seen from in or over a wide disk, its far side runs out to a horizon: rays that leave just after they cross its
+  // plane. A ray between two tabled ones has to end where it truly ends, or the horizon is drawn with the table's teeth.
+  test('between the tabled rays a ray is still there until it gets away, and gone right after', () => {
+    const NEAR = 0.01 // rad from its end
+    for (const x of [78, 3000, 30_000]) {
+      const rays = raysFor(x)
+      for (const eps of [0.4, 0.9, 1.3, 1.57, 2.2]) {
+        const end = sweep(x, eps).phi
+        const b = (x * Math.sin(eps)) / Math.sqrt(1 - 1 / x)
+
+        const before = rayRadius(rays, eps, end - NEAR)
+        const after = rayRadius(rays, eps, end + NEAR)
+
+        expect(before / (b / Math.sin(NEAR))).toBeGreaterThan(0.9) // nearly straight by then: r = b / sin(what is left)
+        expect(before / (b / Math.sin(NEAR))).toBeLessThan(1.1)
+        expect(after).toBe(Infinity)
+      }
+    }
+  })
+
+  test('a ray into the shadow is inside the horizon from where it reaches it, between the tabled rays too', () => {
+    const x = 10
+    const rays = raysFor(x)
+    for (const part of [0.3, 0.77, 0.93]) {
+      const eps = rays.shadow * part
+      const end = sweep(x, eps).phi
+
+      expect(rayRadius(rays, eps, end - 0.02)).toBeGreaterThan(1)
+      expect(rayRadius(rays, eps, end + 0.02)).toBe(0)
+    }
+  })
 })

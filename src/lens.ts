@@ -121,8 +121,6 @@ export function magnification(lens: Lens, eps: number, gamma: number, rho: numbe
 export const RAY_ROWS = 256 // the first half rays into the shadow, the second half rays past it
 export const RAY_COLUMNS = 512
 export const RAY_SWEEP = 3 * Math.PI // a disk is met at most three times: once a half turn
-export const GONE = -1 // u after the ray has got away
-export const FALLEN = 2 // u after it has fallen through the horizon
 const HALF = RAY_ROWS / 2
 /** ln of how far into the shadow the rows reach: the first inward row is EDGE of its angle from the edge. */
 export const INWARD_SPAN = Math.log(1 / EDGE)
@@ -130,7 +128,10 @@ export const INWARD_SPAN = Math.log(1 / EDGE)
 /**
  * u = r_s/r along each ray, at φ = 0 … RAY_SWEEP in RAY_COLUMNS steps: where a ray from the eye crosses the plane of a
  * disk, how far out it is. Rows crowd towards the shadow's edge from both sides, as the bending table's do. Kept as w = u·b,
- * b the ray's impact parameter: far out that is sin(φ + ε), smooth from row to row where u itself goes as 1/sin ε.
+ * b the ray's impact parameter: below 0 the ray has got away, above b it has fallen through the horizon. Far out w is
+ * that of a straight line, sin(φ + ε), and the rows there lie many degrees apart, too far to draw a sine between them:
+ * so for the rays past the shadow the table holds only what the hole adds to the straight line (`straight`), which is
+ * small and smooth there, as the bending table holds δ and not f.
  */
 export interface Rays {
   readonly x: number
@@ -168,16 +169,26 @@ export function raysFor(x: number): Rays {
     const h = stepFor(eps)
     let [u, v] = [1 / x, slopeAt(1 / x, eps)]
     let [phi, filled] = [0, 0]
-    while (filled < RAY_COLUMNS) {
+    let end: number | null = null // φ where the ray gets away or reaches the horizon
+    while (filled < RAY_COLUMNS && end === null) {
       const [next, slope] = step(u, v, h)
       for (; filled < RAY_COLUMNS && filled * column <= phi + h; filled++) table[at + filled] = b * (u + ((next - u) * (filled * column - phi)) / h)
-      if (next <= 0 || next >= 1) break
-      ;[u, v, phi] = [next, slope, phi + h]
+      if (next <= 0) end = phi + (h * u) / (u - next)
+      else if (next >= 1) end = phi + (h * (1 - u)) / (next - u)
+      else [u, v, phi] = [next, slope, phi + h]
     }
-    for (; filled < RAY_COLUMNS; filled++) table[at + filled] = b * (u < 0.5 ? GONE : FALLEN)
+    // Past its end the ray is carried straight on, at the slope it ends with: d(u·b)/dφ is −1 where u = 0 and +1 where
+    // u = 1, by Binet's first integral. A constant there would be a cliff, and a ray between two tabled ones, one ended
+    // and one not, would end on the cliff's edge and not where it ends: the disk's horizon drawn in teeth.
+    const isAway = u < 0.5
+    for (; end !== null && filled < RAY_COLUMNS; filled++) table[at + filled] = isAway ? end - filled * column : b + filled * column - end
+    if (row >= HALF) for (let c = 0; c < RAY_COLUMNS; c++) table[at + c] -= straight(eps, c * column)
   }
   return { x, shadow, span, table }
 }
+
+/** u·b along a ray where there is no hole: a straight line, sin(φ + ε), carried straight on past its end at φ = π − ε. */
+export const straight = (eps: number, phi: number): number => (phi + eps < Math.PI ? Math.sin(phi + eps) : Math.PI - phi - eps)
 
 /** r_s: the impact parameter of a ray leaving an eye at rest x r_s out at ε from the hole. */
 export const impact = (x: number, eps: number): number => (x * Math.sin(eps)) / Math.sqrt(1 - 1 / x)
@@ -191,6 +202,7 @@ export function rayRadius(rays: Rays, eps: number, phi: number): number {
   const left = Math.floor(col)
   const at = (r: number, c: number): number => rays.table[r * RAY_COLUMNS + c]
   const along = (r: number): number => at(r, left) + (at(r, left + 1) - at(r, left)) * (col - left)
-  const u = (along(lower) + (along(lower + 1) - along(lower)) * (row - lower)) / impact(rays.x, eps)
+  const added = along(lower) + (along(lower + 1) - along(lower)) * (row - lower)
+  const u = (eps < rays.shadow ? added : added + straight(eps, phi)) / impact(rays.x, eps)
   return u >= 1 ? 0 : u <= 0 ? Infinity : 1 / u
 }
