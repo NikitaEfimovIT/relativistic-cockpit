@@ -20,7 +20,7 @@ import {
   stepSim, toggleArm, toggleBus, toggleCabinLights, toggleEngine, toggleFans, toggleFilter, toggleHud, toggleInstrumentsDim, toggleScrubber, toggleShield,
   toggleShutters, totalLoadW, turnClock, type Breakers, type SimState,
   crewOf, cutOff, eventTimer, isChemBurning, nudgeChemThrottle, setStick, toggleChemEngine, toggleCrossfeed, toggleFeed, toggleLightMode, toggleManualAttitude,
-  togglePressurisation,
+  togglePressurisation, wreckText,
 } from './sim'
 import { PROPELLANT, RCS_PROPELLANT, deltaV } from './chemical'
 import { LANGS, LANG_NAMES, currentLang, legendIn, setLang, useLang, type Lang } from './labels'
@@ -429,11 +429,13 @@ const openDrawers = (b: Body): string =>
 
 function FlightStatus() {
   const [status, setStatus] = useState('')
+  const [wreck, setWreck] = useState<string | null>(null)
   useEffect(() => {
     const id = setInterval(() => {
       const s = sim.get()
       const aboard = body.get()
       const link = commLink(s.course, s.ship)
+      setWreck(s.wrecked ? wreckText(s) : null)
       setStatus([
         `место: ${placeText(aboard)}`,
         `взгляд на: ${currentAim()?.id ?? 'ничего'}`,
@@ -468,7 +470,14 @@ function FlightStatus() {
     }, STATUS_INTERVAL_MS)
     return () => clearInterval(id)
   }, [])
-  return <div role="status" className="sr-only">{status}</div>
+  // A lost ship is still and silent: the window says what it was lost to, since no instrument aboard can.
+  // ponytail: in Russian whatever the language of the legends, as the log's lines are.
+  return (
+    <>
+      {wreck && <div role="alert" className="wreck">{wreck} · R — заново</div>}
+      <div role="status" className="sr-only">{status}</div>
+    </>
+  )
 }
 
 /** The keys along the bottom of the window, in the language of the legends. */

@@ -454,7 +454,7 @@ export function stepSim(s: SimState, dtReal: number): SimState {
   const co2 = stepCo2(s.co2, isScrubbing(s), dTau)
   const { habitat, tripped } = stepHabitat(s.habitat, { busOn: s.busOn, baseLoadW: baseLoadW(s) }, dTau)
   const stepped: SimState = {
-    ...s, ...motion, burnStartedAt, warp, spool, field, dose, alarm: isExposed || dose >= LETHAL_DOSE || motion.wrecked, power, lights, shutters,
+    ...s, ...motion, burnStartedAt, warp, spool, field, dose, alarm: isExposed || dose >= LETHAL_DOSE, power, lights, shutters,
     filter, dim, messagesHeard,
     mailArrivedAt, co2, habitat, busOn: s.busOn && !tripped, busTripped: s.busTripped || tripped,
   }
@@ -475,7 +475,7 @@ const CREW_LOG: Readonly<Record<CrewCondition, readonly [string, LogLevel]>> = {
 }
 const capital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
 /** The log's line for a wreck: the air or the ground of the body that pulled the ship, or the hole it came too near. */
-const wreckText = (s: SimState): string => {
+export const wreckText = (s: SimState): string => {
   const globe = s.local?.centre != null ? ALL_GLOBES[s.local.centre] : null
   if (globe) return `Корабль разрушен: ${globe.ceiling > 0 ? 'вход в атмосферу' : 'удар о поверхность'}, ${globe.name}`
   const near = holeNear(shipPosition(s.course, s.ship.x))

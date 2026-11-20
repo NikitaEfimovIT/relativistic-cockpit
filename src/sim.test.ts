@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import { LETHAL_DOSE, betaOf, gammaOf } from './physics'
 import {
   CLOCK_STEPS, clockHold, clockSetting, confirmTarget, currentWarp, faceCo2, initialSim, isBrakingOverdue, isShielded, moveTargetCursor, nudgeThrottle,
-  readyForStart, selectTarget, setThrottle, stepSim, toggleArm, toggleBreaker, toggleBus, toggleCabinLights, toggleEngine, toggleFans, toggleFilter,
+  readyForStart, selectTarget, setThrottle, stepSim, wreckText, toggleArm, toggleBreaker, toggleBus, toggleCabinLights, toggleEngine, toggleFans, toggleFilter,
   toggleHud, toggleInstrumentsDim, toggleScrubber, toggleShield, toggleShutters, turnClock, type SimState,
   FAULT_WARP, toggleHeater, toggleIsolation, toggleReactor, toggleRepress, toggleVent, toggleLightMode,
   BURN_WARP, crewOf, cutOff, eventTimer, isChemBurning, setChemThrottle, nudgeChemThrottle, setStick, toggleChemEngine, toggleFeed, toggleManualAttitude,
@@ -583,5 +583,12 @@ describe('by a black hole', () => {
     const lost = stepSim(parkedBySgrA(1.4), 0.05)
     expect(lost.wrecked).toBe(true)
     expect(lost.log.map((entry) => entry.text)).toContain('Корабль разрушен: падение в чёрную дыру, Sgr A*')
+  })
+
+  test('a ship lost to a hole says what it was lost to, and does not call it radiation', () => {
+    const lost = stepSim(parkedBySgrA(1.4), 0.05)
+
+    expect(wreckText(lost)).toBe('Корабль разрушен: падение в чёрную дыру, Sgr A*')
+    expect(lost.alarm).toBe(false) // at rest, no dose: the РАДИАЦИЯ cell has nothing to say
   })
 })
