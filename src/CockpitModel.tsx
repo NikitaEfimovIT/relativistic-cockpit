@@ -22,6 +22,7 @@ import {
   turnClock, type Breaker, type SimState,
 } from './sim'
 import { createMonitorMaterial } from './sky'
+import { finishOf, withWear, type WearOptions } from './wear'
 import { BoardDial, StatusScreen } from './WallBoard'
 import { celsius, pressureKpa } from './habitat'
 
@@ -54,6 +55,14 @@ function prepare(scene: THREE.Group): Model {
   const nodes = new Map<string, THREE.Object3D>()
   const glass: THREE.Mesh[] = []
   const lightLines = new Set<THREE.MeshStandardMaterial>()
+  // The model's materials are plain colours; the finish is the app's. One worn copy of a material for each finish it takes.
+  const worn = new Map<string, THREE.MeshStandardMaterial>()
+  const wornCopy = (material: THREE.MeshStandardMaterial, finish: WearOptions): THREE.MeshStandardMaterial => {
+    const key = `${material.uuid}:${JSON.stringify(finish)}`
+    const made = worn.get(key) ?? withWear(material.clone(), finish)
+    worn.set(key, made)
+    return made
+  }
   scene.updateMatrixWorld(true) // the shields copy the glass where the model puts it
   scene.traverse((node) => {
     nodes.set(node.name, node)
@@ -71,7 +80,9 @@ function prepare(scene: THREE.Group): Model {
       material.opacity = 0.55
     }
     if (material.name === 'light_line') lightLines.add(material)
-    if (node.name.endsWith('_lens')) node.material = material.clone() // each lamp is lit on its own
+    const finish = finishOf(material.name, node.name)
+    if (node.name.endsWith('_lens')) node.material = material.clone() // each lamp is lit on its own, and keeps that copy
+    else if (finish) node.material = wornCopy(material, finish)
     node.castShadow = true
     node.receiveShadow = true
   })
