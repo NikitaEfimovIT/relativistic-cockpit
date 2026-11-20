@@ -31,7 +31,7 @@ export interface Hole {
   readonly body: string // its place in BODIES
   readonly name: string // as the instruments call it
   readonly mass: number // M☉
-  readonly parking: number // r_s from its centre, at least the tidal limit
+  readonly parking: number // r_s from its centre; further out if the tides there are over 1 g (parkingRadius)
   readonly position: Vec3 // ly from the Sun, galactic axes
   readonly disk: Disk | null
   readonly companion: Companion | null
@@ -125,16 +125,19 @@ export function holeAt(body: string): Hole {
 
 // A body stretched by more than this across its length dies (choice: about what a pilot survives briefly, head to foot).
 const TIDE_LIMIT = 10 * G0 // m/s²
+/** The ship parks no nearer than where the stretch is down to this (choice: a weight one can live in), ∛10 times as far out. */
+const PARKING_TIDE = G0 // m/s²
 const BODY_LENGTH = 2 // m
 
-/** m: where the stretch 2GM·L/r³ across a body reaches the limit. */
-export const tidalRadius = (mass: number): number => Math.cbrt((2 * mass * SUN_GM * BODY_LENGTH) / TIDE_LIMIT)
+/** m: where the stretch 2GM·L/r³ across a body reaches `limit`, by default the one that kills. */
+export const tidalRadius = (mass: number, limit: number = TIDE_LIMIT): number => Math.cbrt((2 * mass * SUN_GM * BODY_LENGTH) / limit)
 
 /** m: nearer than this the ship is lost, to the tides or, inside the photon sphere, to the hole, which no view survives. */
 export const wreckRadius = (mass: number): number => Math.max(1.5 * schwarzschildRadius(mass), tidalRadius(mass))
 
 /** m from the centre where the ship stops. */
-export const parkingRadius = (hole: Hole): number => Math.max(hole.parking * schwarzschildRadius(hole.mass), tidalRadius(hole.mass))
+export const parkingRadius = (hole: Hole): number =>
+  Math.max(hole.parking * schwarzschildRadius(hole.mass), tidalRadius(hole.mass, PARKING_TIDE))
 
 /** Ship seconds per far-away second for a ship at rest at r: √(1 − r_s/r). */
 export const clockRate = (rs: number, r: number): number => Math.sqrt(1 - rs / r)

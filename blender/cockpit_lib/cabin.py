@@ -179,6 +179,7 @@ CO2_Y, CO2_Z = 0.1, -0.215  # m: over ПОГЛОТИТЕЛЬ, between the pod's 
 STICK = (-0.69, 0.25, CONSOLE_TOP + 0.003)  # m: the attitude stick under the left hand
 CHEM_LEVER = (-0.95, 0.2, CONSOLE_TOP + 0.003)  # m: the chemical engine's lever, outboard of it
 CUTOFF = (-0.78, 0.5, CONSOLE_TOP + 0.003)  # m: the red cutoff, forward of the stick, well inside the desk's edges (13 cm and more)
+AUTOBRAKE = (0.665, 0.47, CONSOLE_TOP + 0.003)  # m: beside the thrust sled on the pilot's side of it (outboard, the sled hides it), between its +1 g and 0 legends
 LEFT_MOUNTS = ('ctl_lights', 'ctl_fans', 'ctl_scrubber', 'scr_co2', 'scr_nav')
 RIGHT_WALL = (('ctl_breaker_nav', 'НАВИГАЦИЯ', True), ('ctl_breaker_comms', 'СВЯЗЬ', True), ('ctl_breaker_dosimeter', 'ДОЗИМЕТР', True),
               ('ctl_breaker_camera', 'КАМЕРА', True), ('ctl_hud', 'ИНДИКАТОРЫ', True), ('ctl_shutters', 'ШТОРКИ', False),
@@ -244,6 +245,7 @@ def build_right_controls(mats) -> None:
     """Under the right hand: the thrust sled; breakers and glass switches on the wall. The target and the shield are on the
     panel."""
     hw.throttle('ctl_throttle', (0.8, 0.4, CONSOLE_TOP + 0.007), FLAT, mats)
+    hw.toggle('ctl_autobrake', AUTOBRAKE, FLAT, mats, 'АВТОТОРМОЖЕНИЕ')
     axes = wall_axes(1)
     face = POD_FACE - 0.003
     for i, (name, text, is_on) in enumerate(RIGHT_WALL):

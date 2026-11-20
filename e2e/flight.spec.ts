@@ -529,6 +529,41 @@ test('a chime calls for braking past the brake point, until the lever goes back'
   expect(await chimes()).toBe(whenBraking)
 })
 
+/** Pixels of the windshield indicators' green in a shot: no star is this green, and with the indicators off there are none. */
+const indicatorPixels = (page: Page, shot: Buffer): Promise<number> => page.evaluate(async (base64) => {
+  const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob())
+  const context = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d')
+  if (!context) throw new Error('2D canvas is unavailable')
+  context.drawImage(bitmap, 0, 0)
+  const data = context.getImageData(0, 0, bitmap.width, bitmap.height).data
+  let count = 0
+  for (let i = 0; i < data.length; i += 4) if (data[i + 1] > 110 && data[i + 1] > data[i] + 40 && data[i + 1] > data[i + 2] + 15) count++
+  return count
+}, shot.toString('base64'))
+// The course mark is at (500, 251), and the panel's hood starts 19 px under it. The line that calls the pilot hangs
+// 84 px over the mark, from 26 px right of it; at 0.9 c the ring of half the sky passes further right than this box.
+const CUE_LINE = { x: 520, y: 158, width: 130, height: 18 }
+
+test('what the navigation computer asks of the pilot is written on the glass over the course mark, clear of the panel’s hood', async ({ page }) => {
+  // 0.9 c, 3.5 ly out: α Cen A is 0.9 ly ahead, and 1 g needs 1.25 ly to stop, so the call to brake is blinking
+  await open(page, '/?beta=0.9&x=3.5')
+  const lit = async (): Promise<number> => indicatorPixels(page, await page.screenshot({ clip: CUE_LINE }))
+
+  await expect.poll(lit).toBeGreaterThan(120) // a line of text is 200 to 400 of them
+  await page.keyboard.press('h')
+  await expect.poll(lit).toBe(0)
+})
+
+test('with АВТОТОРМОЖЕНИЕ on, the navigation computer pulls the thrust lever back once the engine runs', async ({ page }) => {
+  // 0.9 c, 3.5 ly out: α Cen A is 0.9 ly ahead, and 1 g needs 1.25 ly to stop
+  await open(page, '/?beta=0.9&x=3.5')
+  await page.keyboard.press('j')
+  await expect(status(page)).toContainText('автоторможение вкл')
+  expect(await throttleOf(page)).toBe(0) // under way with the bus on and the engine armed but not started: the lever is still the pilot's
+  await page.keyboard.press('i')
+  await expect(status(page)).toContainText('тяга -1.00')
+})
+
 test('a toggle clicks once, a key by a screen sounds going down and again coming up, by keyboard or by mouse', async ({ page }) => {
   // Counts the short sounds the page starts: the controls' clicks, not the cabin's loops of noise, which are seconds long
   await page.addInitScript(() => {

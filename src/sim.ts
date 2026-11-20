@@ -8,8 +8,8 @@ import { INITIAL_HABITAT, busLoadW, crewCondition, heatersRunning, isVenting, st
 import { CO2_SCRUBBED, UNTENDED_AIR_WARP, co2AtFace, stepCo2 } from './lifeSupport'
 import { C, G0, HULL_BETA, LETHAL_DOSE, YEAR, advanceShip, betaOf, doseRate, rest, type Ship } from './physics'
 import {
-  LAUNCH_TARGET, TARGETS, arrivalRadius, clockLimit, distanceTo, fallsIntoHole, forwardOf, holeNear, launchCourse, navigate, rotated, setCourse,
-  shipPosition, stepTurn, turnAngle, type Course,
+  LAUNCH_TARGET, TARGETS, arrivalRadius, autoStopToGo, brakingDistance, clockLimit, distanceTo, fallsIntoHole, forwardOf, holeNear, launchCourse,
+  navigate, rotated, setCourse, shipPosition, stepTurn, turnAngle, type Course,
 } from './voyage'
 import { clockRate, tidalRadius } from './blackHoles'
 
@@ -63,6 +63,7 @@ export interface SimState {
   readonly engineOn: boolean // where the start switch is; the engine runs only if armed and powered too
   readonly spool: number // 0..1
   readonly throttle: number // -1 (full braking) .. 1 (full thrust)
+  readonly autoBrakeOn: boolean // АВТОТОРМОЖЕНИЕ: the navigation computer pulls the lever back to stop the ship on its stop point
   readonly shieldOn: boolean
   readonly field: number // 0..1
   readonly dose: number // Sv, accumulated by the crew
@@ -132,6 +133,7 @@ const coldSim = (phi: number, x: number): SimState => ({
   engineOn: false,
   spool: 0,
   throttle: 0,
+  autoBrakeOn: false,
   shieldOn: false,
   field: 0,
   dose: 0,
@@ -219,6 +221,7 @@ export const toggleFilter = (s: SimState): SimState => ({ ...s, filterOn: !s.fil
 export const toggleInstrumentsDim = (s: SimState): SimState => ({ ...s, instrumentsDimmed: !s.instrumentsDimmed })
 export const setThrottle = (s: SimState, value: number): SimState => ({ ...s, throttle: clamp(value, -1, 1) })
 export const nudgeThrottle = (s: SimState, delta: number): SimState => setThrottle(s, s.throttle + delta)
+export const toggleAutoBrake = (s: SimState): SimState => ({ ...s, autoBrakeOn: !s.autoBrakeOn })
 export const turnClock = (s: SimState, step: 1 | -1): SimState => ({ ...s, clock: clamp(s.clock + step, 0, CLOCK_STEPS.length - 1) })
 /** Ship seconds per real second that the pilot has set the clock to. */
 export const clockSetting = (s: SimState): number => CLOCK_STEPS[s.clock]
@@ -260,6 +263,31 @@ export const isShielded = (s: SimState): boolean => s.shieldOn && s.busOn
 /** The main engine is held while the attitude thrusters turn the ship. */
 export const properAcceleration = (s: SimState): number =>
   isEngineLive(s) && !s.course.turn ? MAX_ACCELERATION * s.throttle * s.spool : 0
+
+/** АВТОТОРМОЖЕНИЕ has the lever: on a leg, with the main engine live and the navigation computer fed. */
+export const isAutoBrakeArmed = (s: SimState): boolean =>
+  s.autoBrakeOn && isNavFed(s) && isEngineLive(s) && s.local === null && !s.course.turn && !s.wrecked
+/** The share of full braking at which АВТОТОРМОЖЕНИЕ takes the lever: choice, a tenth of the engine kept in hand. */
+export const AUTO_BRAKE_SHARE = 0.9
+
+/**
+ * Where the lever stands this frame. АВТОТОРМОЖЕНИЕ leaves it to the pilot until stopping on the point takes
+ * AUTO_BRAKE_SHARE of full braking, or until the `dTau` of flight ahead would carry the ship past where full braking is
+ * enough. From then, and whenever the lever is already back, it holds the lever where the braking ends on the point: the
+ * full-braking distance over the distance left, a steady deceleration, exact however long the frame. Past the point it
+ * brakes with all the engine has.
+ */
+function autoLever(s: SimState, dTau: number): number {
+  if (!isAutoBrakeArmed(s)) return s.throttle
+  const need = (ship: Ship): number => {
+    const toGo = autoStopToGo(s.course, ship.x)
+    return toGo > 0 ? brakingDistance(ship.phi) / toGo : Infinity
+  }
+  const now = need(s.ship)
+  const isDue = s.throttle < 0 || now >= AUTO_BRAKE_SHARE || need(advanceShip(s.ship, properAcceleration(s), dTau)) >= 1
+  const pull = Math.min(1, now / Math.max(s.spool, Number.EPSILON)) // the engine gives its spool's share of what the lever asks
+  return isDue && pull > 0 ? -pull : s.throttle
+}
 
 const isScrubbing = (s: SimState): boolean => s.busOn && s.scrubberOn
 /** The fans stir the air, and so does any thrust: it gives the cabin an up, and warm breath rises. */
@@ -324,7 +352,7 @@ export const clockHold = (s: SimState): ClockHold => clockCeiling(s).hold
  * ponytail: any braking silences it, even a lever only part way back that will overshoot; the HUD still says ТОРМОЗИ.
  */
 export const isBrakingOverdue = (s: SimState): boolean =>
-  navigate(s.course, s.ship).cue === 'brake' && properAcceleration(s) >= 0
+  navigate(s.course, s.ship).cue === 'brake' && properAcceleration(s) >= 0 && !isAutoBrakeArmed(s)
 
 export type TimerEvent = 'impact' | 'burn' | 'brake' | 'periapsis'
 /** An orbit rounder than this has no periapsis worth timing: choice; the launch orbit is round to 10⁻¹⁵. */
@@ -428,13 +456,16 @@ export function stepSim(s: SimState, dtReal: number): SimState {
   const spool = approach(s.spool, isEngineLive(s) ? 1 : 0, SPOOL_TIME)
   const field = approach(s.field, isShielded(s) ? 1 : 0, FIELD_TIME)
   const steered = steer(s, stepTurn(s.course, dtReal), dtReal)
-  const acceleration = properAcceleration({ ...s, spool, course: steered.course })
   const warp = Math.min(clockCeiling({ ...s, spool, ...steered }).warp, s.warp * Math.exp(dtReal / WARP_RISE_TIME))
   const untilFault = Math.max(0, s.nextFaultAt - s.ship.tau)
   const dTau = Math.min(dtReal * warp, untilFault) // a fault ends the frame where it strikes: the clock drops from there
+  const lever = autoLever({ ...s, spool, course: steered.course }, dTau)
+  const acceleration = properAcceleration({ ...s, spool, course: steered.course, throttle: lever })
   const moved = move({ ...s, course: steered.course, propulsion: stepPressure(steered.propulsion, dTau) }, acceleration, dTau)
   const fallen = fallsIntoHole(shipPosition(s.course, s.ship.x), shipPosition(moved.course, moved.ship.x))
   const motion = { ...moved, wrecked: moved.wrecked || fallen !== null }
+  // the leg the automat braked is over: it lets the lever go at its detent
+  const throttle = isAutoBrakeArmed(s) && lever < 0 && motion.local !== null ? 0 : lever
   const { ship, course } = motion
   const burnStartedAt = isChemBurning({ ...s, ...motion }) ? (s.burnStartedAt ?? s.ship.tau) : null
   const dose = s.dose + (isShielded(s) ? 0 : doseRate(ship.phi) * dTau) // ponytail: ideal shield, no leakage model
@@ -454,7 +485,7 @@ export function stepSim(s: SimState, dtReal: number): SimState {
   const co2 = stepCo2(s.co2, isScrubbing(s), dTau)
   const { habitat, tripped } = stepHabitat(s.habitat, { busOn: s.busOn, baseLoadW: baseLoadW(s) }, dTau)
   const stepped: SimState = {
-    ...s, ...motion, burnStartedAt, warp, spool, field, dose, alarm: isExposed || dose >= LETHAL_DOSE, power, lights, shutters,
+    ...s, ...motion, throttle, burnStartedAt, warp, spool, field, dose, alarm: isExposed || dose >= LETHAL_DOSE, power, lights, shutters,
     filter, dim, messagesHeard,
     mailArrivedAt, co2, habitat, busOn: s.busOn && !tripped, busTripped: s.busTripped || tripped,
   }

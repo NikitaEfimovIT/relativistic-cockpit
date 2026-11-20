@@ -35,10 +35,12 @@ describe('Cygnus X-1 and its star', () => {
   const dot = (a: readonly number[], b: readonly number[]): number => a.reduce((s, v, i) => s + v * b[i], 0)
   const angle = (a: readonly number[], b: readonly number[]): number => Math.acos(dot(a, b) / Math.hypot(...a) / Math.hypot(...b))
 
-  test('21.2 Suns, 2.22 kpc off; the ship stops where the tides reach 10 g, 78 r_s out', () => {
+  test('21.2 Suns, 2.22 kpc off; the ship stops where the tides are down to 1 g, 167 r_s out: ∛10 times as far as they kill', () => {
     expect(cygX1?.mass).toBe(21.2)
     expect(cygX1 && Math.hypot(...cygX1.position)).toBeCloseTo(7241, 0)
-    expect(cygX1 && parkingRadius(cygX1) / schwarzschildRadius(21.2)).toBeCloseTo(77.6, 0)
+    expect(cygX1 && parkingRadius(cygX1) / schwarzschildRadius(21.2)).toBeCloseTo(167.2, 0)
+    expect(cygX1 && parkingRadius(cygX1) / 1e3).toBeCloseTo(10_470, -1)
+    expect(cygX1 && parkingRadius(cygX1) / wreckRadius(21.2)).toBeCloseTo(Math.cbrt(10), 9)
   })
 
   test('its blue supergiant circles it 0.244 AU off, in the plane of the disk, 25° in radius as seen from the hole', () => {

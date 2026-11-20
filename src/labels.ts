@@ -19,6 +19,7 @@ const LEGENDS: Readonly<Record<string, readonly [en: string, zh: string]>> = {
   'ЧАСЫ': ['CLOCK', '时钟'],
   'СЧЁТЧИК': ['GEIGER', '计数器'],
   'ТЯГА': ['THRUST', '推力'],
+  'АВТОТОРМОЖЕНИЕ': ['AUTO BRAKE', '自动制动'],
   'БОРТ, лет': ['SHIP, yr', '船时，年'],
   'ГАЛАКТИКА, лет': ['GALAXY, yr', '银河时，年'],
   'СВЕТ. РЕЖИМ': ['LIGHT MODE', '光速模式'],

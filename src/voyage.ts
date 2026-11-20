@@ -113,6 +113,7 @@ export interface Place {
   readonly standoff: number // ly
   readonly arrival: number // ly
   readonly lead: number // real s: how early the brake call comes where the clock can slow no further
+  readonly isGlobe: boolean // a planet or a moon: the ship rests in its Hill sphere and falls, where a star or a hole leaves it parked
 }
 
 // The brake call comes early by what the pilot needs to act on it: to hear it and decide, then to pull the lever from
@@ -143,10 +144,10 @@ const ARRIVAL_STANDOFFS = 20
 const GLOBE_ARRIVAL_STANDOFFS = 5
 
 const starPlace = ({ name, position, standoff }: Body): Place =>
-  ({ name, position, standoff, arrival: ARRIVAL_STANDOFFS * standoff, lead: HOLE_BODIES.has(name) ? HOLE_LEAD_S : BRAKE_LEAD_S })
+  ({ name, position, standoff, arrival: ARRIVAL_STANDOFFS * standoff, lead: HOLE_BODIES.has(name) ? HOLE_LEAD_S : BRAKE_LEAD_S, isGlobe: false })
 const globePlace = (globe: Globe): Place => {
   const standoff = Math.max(globe.hill / HILL_STANDOFFS, GLOBE_STANDOFF_RADII * globe.radiusM) / LY
-  return { name: globe.name, position: globe.position, standoff, arrival: GLOBE_ARRIVAL_STANDOFFS * standoff, lead: BRAKE_LEAD_S }
+  return { name: globe.name, position: globe.position, standoff, arrival: GLOBE_ARRIVAL_STANDOFFS * standoff, lead: BRAKE_LEAD_S, isGlobe: true }
 }
 
 /** The Sun's planets outwards from it, the Moon after the Earth. */
@@ -379,11 +380,18 @@ export function brakeCallDistance(course: Course, phi: number = 0): number {
     : Math.max(precision, pace / EFOLD_RATE) * Math.exp(efolds - 1)
 }
 
+/**
+ * m along the course to where АВТОТОРМОЖЕНИЕ brings the ship to rest: the stop point; by a globe as far short of it as a
+ * pilot who answers the brake call at once rests, half way into its Hill sphere, where the capture is flown from.
+ */
+export const autoStopToGo = (course: Course, x: number): number =>
+  distanceToGo(course, x) - (TARGETS[course.target].isGlobe ? brakeCallDistance(course) : 0)
+
 /** m from the ship to one of TARGETS, straight. */
 export const distanceTo = (course: Course, ship: Ship, target: number): number =>
   length(sub(TARGETS[target].position, shipPosition(course, ship.x))) * LY
 
-/** What the hints on the HUD and the nav screen say. There is no autopilot: braking is the pilot's. */
+/** What the hints on the HUD and the nav screen say. Braking is the pilot's, unless АВТОТОРМОЖЕНИЕ is on (sim.ts). */
 export function navigate(course: Course, ship: Ship): Navigation {
   const distance = distanceTo(course, ship, course.target)
   const toGo = distanceToGo(course, ship.x)

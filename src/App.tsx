@@ -17,7 +17,7 @@ import { BETA_MAX, G0, LY, T_CMB, forwardIlluminance, oneMinusBeta, rearCameraGa
 import { courseOpenness, filterTransmission } from './cabinLogic'
 import {
   clockHold, clockSetting, confirmTarget, currentWarp, faceCo2, initialSim, isEngineLive, isLetterRead, moveTargetCursor, nudgeThrottle, properAcceleration, setThrottle, sim,
-  stepSim, toggleArm, toggleBus, toggleCabinLights, toggleEngine, toggleFans, toggleFilter, toggleHud, toggleInstrumentsDim, toggleScrubber, toggleShield,
+  stepSim, toggleArm, toggleAutoBrake, toggleBus, toggleCabinLights, toggleEngine, toggleFans, toggleFilter, toggleHud, toggleInstrumentsDim, toggleScrubber, toggleShield,
   toggleShutters, totalLoadW, turnClock, type Breakers, type SimState,
   crewOf, cutOff, eventTimer, isChemBurning, nudgeChemThrottle, setStick, toggleChemEngine, toggleCrossfeed, toggleFeed, toggleLightMode, toggleManualAttitude,
   togglePressurisation, wreckText,
@@ -201,6 +201,7 @@ function useKeyboard(look: LookRef, canvas: HTMLElement) {
       if (e.code === 'KeyC') { sim.update(toggleScrubber); playClick('switch') }
       if (e.code === 'KeyO') { sim.update(toggleShield); playClick('guardedSwitch') }
       if (e.code === 'KeyX') { sim.update((s) => setThrottle(s, 0)); playClick('detent') }
+      if (e.code === 'KeyJ') { sim.update(toggleAutoBrake); playClick('switch') }
       if (e.code === 'KeyL') { sim.update(toggleCabinLights); playClick('switch') }
       if (e.code === 'KeyH') { sim.update(toggleHud); playClick('switch') }
       if (e.code === 'KeyB') { sim.update(toggleShutters); playClick('switch') }
@@ -416,6 +417,7 @@ function flightText(s: SimState): string {
     `топливо ${percent(p.propellant, PROPELLANT)}, маневровые ${percent(p.rcsPropellant, RCS_PROPELLANT)}, запас ${Math.round(deltaV(p))} м/с`,
     `ориентация ${s.manualAttitude ? 'ручн' : 'авто'}`,
     `световой режим ${s.lightModeOn ? 'вкл' : 'выкл'}`,
+    `автоторможение ${s.autoBrakeOn ? 'вкл' : 'выкл'}`,
     `таймер ${(() => { const t = eventTimer(s); return t ? `${TIMER_TEXT[t.event]} ${durationText(t.seconds)}` : 'нет' })()}`,
     ...(s.wrecked ? ['корабль разрушен'] : []),
   ].join(', ')
@@ -483,19 +485,19 @@ function FlightStatus() {
 /** The keys along the bottom of the window, in the language of the legends. */
 const HINTS: Readonly<Record<Lang, readonly string[]>> = {
   ru: [
-    'Под центральным экраном: ШИНА (P) → световой режим (G) → ВЗВЕДЕНИЕ (U) → пуск под крышкой (I), щит под крышкой (O), АВАРИЯ (M) · под правым: цель ▲▼ (Shift+T, T), ВЫБРАТЬ (Enter) · справа на консоли: салазки тяги (↑↓, полный тормоз Shift+↓, X)',
+    'Под центральным экраном: ШИНА (P) → световой режим (G) → ВЗВЕДЕНИЕ (U) → пуск под крышкой (I), щит под крышкой (O), АВАРИЯ (M) · под правым: цель ▲▼ (Shift+T, T), ВЫБРАТЬ (Enter) · справа на консоли: салазки тяги (↑↓, полный тормоз Shift+↓, X), рядом АВТОТОРМОЖЕНИЕ (J)',
     '· химический двигатель: 1 2 3 4, ручка [ ] или перетаскивание, отсечка 0 · АВТО / РУЧН (K), повороты W A S D, крен Q E',
     '· левая стенка: свет (L), вентиляция (V), поглотитель CO₂ (C) · правая: H, B, F, N, автоматы · часы: + и − справа от экрана времени (=, −) · осмотр — перетаскивание, зум — колесо · R — заново',
     '· Пробел — встать с кресла; на ногах: щелчок берёт мышь (Esc отпускает), WASD — ходьба, E — сесть или взять то, что в прицеле',
   ],
   en: [
-    'Under the centre screen: MAIN BUS (P) → LIGHT MODE (G) → ARM (U) → guarded start (I), guarded SHIELD (O), MASTER ALARM (M) · under the right screen: target ▲▼ (Shift+T, T), SELECT (Enter) · right desk: thrust sled (↑↓, full braking Shift+↓, X)',
+    'Under the centre screen: MAIN BUS (P) → LIGHT MODE (G) → ARM (U) → guarded start (I), guarded SHIELD (O), MASTER ALARM (M) · under the right screen: target ▲▼ (Shift+T, T), SELECT (Enter) · right desk: thrust sled (↑↓, full braking Shift+↓, X), AUTO BRAKE beside it (J)',
     '· chemical engine: 1 2 3 4, lever [ ] or drag, CUTOFF 0 · attitude AUTO / MAN (K), turn W A S D, roll Q E',
     '· left wall: lights (L), fans (V), CO₂ scrubber (C) · right wall: H, B, F, N, breakers · clock: + and − right of the time screen (=, −) · look around — drag, zoom — wheel · R — new flight',
     '· Space — stand up; on foot: a click takes the mouse (Esc gives it back), WASD — walk, E — sit down or use what is in the sight',
   ],
   zh: [
-    '中央屏幕下方：主母线 (P) → 光速模式 (G) → 预位 (U) → 带护盖的启动开关 (I)，带护盖的护盾开关 (O)，主告警 (M) · 右屏下方：目标 ▲▼ (Shift+T, T)，选择 (Enter) · 右侧台面：推力滑块 (↑↓，全力制动 Shift+↓，X)',
+    '中央屏幕下方：主母线 (P) → 光速模式 (G) → 预位 (U) → 带护盖的启动开关 (I)，带护盖的护盾开关 (O)，主告警 (M) · 右屏下方：目标 ▲▼ (Shift+T, T)，选择 (Enter) · 右侧台面：推力滑块 (↑↓，全力制动 Shift+↓，X)，旁边是自动制动 (J)',
     '· 化学发动机：1 2 3 4，推力杆 [ ] 或拖动，切断 0 · 姿态 自动/手动 (K)，转向 W A S D，滚转 Q E',
     '· 左舱壁：照明 (L)，通风 (V)，CO₂吸收 (C) · 右舱壁：H, B, F, N，断路器 · 时钟：时间屏右侧的 + 和 − (=, −) · 环视——拖动，缩放——滚轮 · R——重新开始',
     '· 空格——离开座椅；行走时：点击锁定鼠标（Esc 释放），WASD——行走，E——坐下或使用准星所指之物',

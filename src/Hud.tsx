@@ -6,7 +6,7 @@ import { auto, distanceText, legend } from './format'
 import { BACKGROUND_LAYER } from './frame'
 import { fedBy, useWake } from './Instruments'
 import { LY, G0, apparentDirection, gammaOf, skyFractionAngle } from './physics'
-import { properAcceleration, sim, type SimState } from './sim'
+import { isAutoBrakeArmed, properAcceleration, sim, type SimState } from './sim'
 import { directionToCentre, earthDistance, earthSource, galacticToShip, indexOfTarget, navigate, starSources, targetDirection, type Cue } from './voyage'
 
 // Indicators on the windshield, focused at infinity like a real head-up display: they stay on the sky when the head
@@ -188,7 +188,19 @@ const seenCentre = (s: SimState): Direction => apparentDirection(directionToCent
 
 const HALF_SKY = 0.5
 const MOST_SKY = 0.9
-const LABEL_BEARING = 0.75 // rad
+const HALF_SKY_LABEL = '½ НЕБА'
+const MOST_SKY_LABEL = '90 % НЕБА'
+const LABEL_BEARING = Math.PI - 0.75 // rad: up and to the left of the course, clear of the column of lines on its right
+const RING_LABEL_GAP_PX = 8 // from the ring to the end of its label
+const CHAR_PX = 6.4 // the width of a character of a label, as drawn
+// The lines by the course mark stand in a column over it and to its right, a row apart, nearest first: the target,
+// the braking distance, γ, what is asked of the pilot, the radio. Nothing hangs under the mark: the panel's hood is
+// 19 px below it in a 1000 × 640 window, and hid whatever did.
+const COLUMN_PX = 26
+const FIRST_ROW_PX = 30
+const ROW_PX = 18
+const row = (n: number): readonly [number, number] => [COLUMN_PX, FIRST_ROW_PX + n * ROW_PX]
+const ringLabelOffset = (text: string): readonly [number, number] => [-RING_LABEL_GAP_PX - text.length * CHAR_PX, 6]
 const EARTH_MARK_LY = 0.002 // about 130 AU: beyond that the Earth is lost in the Sun's glare anyway
 const WIDE_TEXT_PX = 1024
 
@@ -209,8 +221,11 @@ const targetLine = (s: SimState): string => {
   return `${legend(nav.name)}  ${distanceText(nav.distance)}`
 }
 const brakingLine = (s: SimState): string => `ТОРМОЗНОЙ ПУТЬ ${distanceText(navigate(s.course, s.ship).braking)}`
+const AUTO_BRAKE_CUES: ReadonlySet<Cue> = new Set(['brakeSoon', 'brake', 'passed'])
 const cueLine = (s: SimState, seconds: number): string => {
   const { cue } = navigate(s.course, s.ship)
+  // the automat has the lever: there is nothing to ask of the pilot
+  if (isAutoBrakeArmed(s) && (s.throttle < 0 || AUTO_BRAKE_CUES.has(cue))) return 'АВТОТОРМОЖЕНИЕ'
   return BLINKING.has(cue) && Math.floor(seconds * 2.5) % 2 === 1 ? '' : CUES[cue]
 }
 /** For a while after a message comes in, where to look for it: the radio is low on the left. */
@@ -301,23 +316,23 @@ export function Hud() {
       <mesh ref={sphere} material={material} layers={BACKGROUND_LAYER} frustumCulled={false} renderOrder={4}>
         <sphereGeometry args={[HUD_RADIUS, 48, 32]} />
       </mesh>
-      <HudText
-        level={level}
-        place={() => COURSE}
-        offset={[26, -30]}
-        text={(s) => `γ ${auto(gammaOf(s.ship.phi), 3)}  ${(properAcceleration(s) / G0).toFixed(2)} g`}
-      />
       {/* The target is dead ahead once the ship has turned onto it: it flies straight at it */}
-      <HudText level={level} place={(s) => targetDirection(s.course, s.ship)} offset={[26, 30]} text={targetLine} widthPx={WIDE_TEXT_PX} />
+      <HudText level={level} place={(s) => targetDirection(s.course, s.ship)} offset={row(0)} text={targetLine} widthPx={WIDE_TEXT_PX} />
       <HudText
         level={level}
         place={(s) => (s.ship.phi > 0 ? COURSE : null)}
-        offset={[26, 48]}
+        offset={row(1)}
         text={brakingLine}
         widthPx={WIDE_TEXT_PX}
       />
-      <HudText level={level} place={() => COURSE} offset={[-110, -54]} text={cueLine} widthPx={WIDE_TEXT_PX} />
-      <HudText level={level} place={() => COURSE} offset={[-110, -72]} text={messageHint} widthPx={WIDE_TEXT_PX} />
+      <HudText
+        level={level}
+        place={() => COURSE}
+        offset={row(2)}
+        text={(s) => `γ ${auto(gammaOf(s.ship.phi), 3)}  ${(properAcceleration(s) / G0).toFixed(2)} g`}
+      />
+      <HudText level={level} place={() => COURSE} offset={row(3)} text={cueLine} widthPx={WIDE_TEXT_PX} />
+      <HudText level={level} place={() => COURSE} offset={row(4)} text={messageHint} widthPx={WIDE_TEXT_PX} />
       <HudText
         level={level}
         place={(s) => (isSunMarked(s) ? starSources(s.course, s.ship)[0].direction : null)}
@@ -332,8 +347,8 @@ export function Hud() {
       />
       <HudText level={level} place={motion(1)} offset={[-5, 5]} text={() => '+ ПО ХОДУ'} />
       <HudText level={level} place={motion(-1)} offset={[-5, 5]} text={() => '× ПРОТИВ ХОДА'} />
-      <HudText level={level} place={ringLabel(HALF_SKY)} offset={[8, 6]} text={() => '½ НЕБА'} />
-      <HudText level={level} place={ringLabel(MOST_SKY)} offset={[8, 6]} text={() => '90 % НЕБА'} />
+      <HudText level={level} place={ringLabel(HALF_SKY)} offset={ringLabelOffset(HALF_SKY_LABEL)} text={() => HALF_SKY_LABEL} />
+      <HudText level={level} place={ringLabel(MOST_SKY)} offset={ringLabelOffset(MOST_SKY_LABEL)} text={() => MOST_SKY_LABEL} />
       <HudText level={level} place={seenCentre} offset={[12, 12]} text={() => 'ЦЕНТР ГАЛАКТИКИ'} />
       <HudText
         level={level}

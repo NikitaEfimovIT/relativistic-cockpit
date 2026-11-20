@@ -18,7 +18,7 @@ import { Co2Screen, Label, NavScreen, RadiationScreen, RearCaption, TargetScreen
 import { AttitudeStick, ChemEngineToggle, ChemLever, CutoffButton, LightModeToggle, STRIP_SWITCHES, StripSwitch } from './FlightControls'
 import { doseRate } from './physics'
 import {
-  confirmTarget, isShielded, moveTargetCursor, sim, toggleBreaker, toggleCabinLights, toggleFans, toggleFilter, toggleHud, toggleInstrumentsDim, toggleScrubber, toggleShutters,
+  confirmTarget, isShielded, moveTargetCursor, sim, toggleAutoBrake, toggleBreaker, toggleCabinLights, toggleFans, toggleFilter, toggleHud, toggleInstrumentsDim, toggleScrubber, toggleShutters,
   turnClock, type Breaker, type SimState,
 } from './sim'
 import { createMonitorMaterial } from './sky'
@@ -150,6 +150,7 @@ const CANOPY_SWITCHES: ReadonlyArray<readonly [string, string, (s: SimState) => 
   ['ctl_tint', 'ТОНИРОВКА', (s) => s.filterOn, toggleFilter], ['ctl_dim', 'ЯРКОСТЬ', (s) => s.instrumentsDimmed, toggleInstrumentsDim],
 ]
 const CAPTION = 0.0095
+const DESK_LEGEND = 0.016 // m: a legend lying on a desk, as ОТСЕЧКА on the left one
 const WALL_STATUS_SCREEN = [0.44, 0.17] as const // m: console.py's STATUS_SCREEN
 const CONSOLE_DIAL = 0.075 // m: console.py's DIAL_RADIUS
 const ROOM_DIAL = 0.055 // m: console.py's ROOM_DIAL
@@ -224,6 +225,9 @@ function Instruments({ nodes, rearImage }: { readonly nodes: ReadonlyMap<string,
       <On node={at('ctl_scrubber')}><PanelSwitch label="ПОГЛОТИТЕЛЬ" isOn={(s) => s.scrubberOn} toggle={toggleScrubber} {...WALL} /></On>
       {/* Right console: the thrust sled; breakers and the canopy's switches on the wall */}
       <On node={at('ctl_throttle')} isPanel={false}><ThrottleLever /></On>
+      <On node={at('ctl_autobrake')}>
+        <PanelSwitch label="АВТОТОРМОЖЕНИЕ" isOn={(s) => s.autoBrakeOn} toggle={toggleAutoBrake} labelSize={DESK_LEGEND} hitSize={0.06} />
+      </On>
       {BREAKERS.map(([name, breaker, text]) => (
         <On key={name} node={at(name)}>
           <PanelSwitch label={text} isOn={(s) => s.breakers[breaker]} toggle={(s) => toggleBreaker(s, breaker)} {...WALL} />
